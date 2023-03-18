@@ -11,7 +11,15 @@ PS = [-1, 1i*3.1299, 2.3899];
 % FS = [1, 0, 1.0729, 0, 0.1641];
 % PS = [-1, 0, -2.25];
 
-force_end_cross = 1;
+Plot_S_from_extracted_M_matrix = true;      % Enable to plot S11 and S21 from the extracted M matrix
+Bandwidth = 40e6;                           % Bandwidth
+center_freq = 3.6e9;                        % Center frequency
+freq_start = 3.5e9;                         % Start frequency (Hz)
+freq_end = 3.7e9;                           % End frequency (Hz)
+
+steps = 1000;                               % Number of steps
+
+Network_Extraction_Force_Ending_With_Cross_Coupling = 1;
 
 M_matrix = zeros(N, N);
 limit_noise_suppressor = 1e-3;
@@ -48,16 +56,17 @@ end
 
 
 if valid
-    WB = waitbar(0,'Extracting network components ....');
+    WB2 = waitbar(0,'Extracting network components ....');
+
     num_coupling = sum(cross_connection_matrix, "all")/2;
     num_FIR = sum(B_enable, "all");
     TOTAL_NUM_EXTRACTION = 2*N + 1 + num_coupling + num_FIR;
 
-    A = sym('A',[4 TOTAL_NUM_EXTRACTION + 1]);
-    B = sym('B',[4 TOTAL_NUM_EXTRACTION + 1]);
-    C = sym('C',[4 TOTAL_NUM_EXTRACTION + 1]);
-    D = sym('D',[4 TOTAL_NUM_EXTRACTION + 1]);
-    P = sym('P',[4 TOTAL_NUM_EXTRACTION + 1]);
+    A = sym('A',[2 TOTAL_NUM_EXTRACTION + 1]);
+    B = sym('B',[2 TOTAL_NUM_EXTRACTION + 1]);
+    C = sym('C',[2 TOTAL_NUM_EXTRACTION + 1]);
+    D = sym('D',[2 TOTAL_NUM_EXTRACTION + 1]);
+    P = sym('P',[2 TOTAL_NUM_EXTRACTION + 1]);
     Extracted_C = zeros(1, N);
     Extracted_B = zeros(1, N);
     
@@ -75,7 +84,7 @@ if valid
     [working_node, ending_node] = swap(working_node, ending_node);
 
     for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
-        waitbar(CURRENT_NUM_EXTRACTION/TOTAL_NUM_EXTRACTION, WB,'Extracting network components ....');
+        waitbar(CURRENT_NUM_EXTRACTION/TOTAL_NUM_EXTRACTION, WB2,'Extracting network components ....');
         if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
             [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
         elseif Extracted_C(working_node) == 0
@@ -103,7 +112,7 @@ if valid
                     [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
                     working_node = next_working_node(working_node, Extracted_C);
                 else
-                    if (working_node>ceil(N/2) && next_working_node(working_node, Extracted_C)<=ceil(N/2)) || (working_node<=ceil(N/2) && next_working_node(working_node, Extracted_C)>ceil(N/2)) 
+                    if (abs(next_working_node(working_node, Extracted_C) - (N+1-ending_node)) >= 2) || (Network_Extraction_Force_Ending_With_Cross_Coupling && ((working_node>ceil(N/2) && next_working_node(working_node, Extracted_C)<=ceil(N/2)) || (working_node<=ceil(N/2) && next_working_node(working_node, Extracted_C)>ceil(N/2)))) 
                         [A, B, C, D, P] = reverse(A, B, C, D, P);
                         [working_node, ending_node] = swap(working_node, ending_node);
                         [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
@@ -116,8 +125,20 @@ if valid
             end
         end
     end
-    close(WB)
+    close(WB2)
 
+    
+    for i = 1:1:N
+        if Extracted_C(i) == 0
+            failed = 1;
+            break;
+        end
+        failed = 0;
+    end
+
+    if failed
+        msgbox("Network extraction failed! Please try another coupling connection.", "Warning", "warn");
+    end
 
     scaled_M_matrix = zeros(N,N);
     scaled_Extracted_C = ones(1, N);
@@ -146,56 +167,66 @@ if valid
 
     RS = SL_scaled_M_matrix(1, 2)^2;
     RL = SL_scaled_M_matrix(end-1, end)^2;
-    Bandwidth = 40e6;
-    f0 = 3.6e9;
-    steps = 100000;
     
-    freq_start = 3.5e9;
-    freq_end = 3.7e9;
 
-    step_size = (freq_end-freq_start)/steps;
-    
-    R = zeros(N, N);
-    R(1,1) = RS;
-    R(end, end) = RL;
-    
-    S11 = zeros(1, steps + 1);
-    S21 = zeros(1, steps + 1);
-    
-    WB2 = waitbar(0,'Calculating S11 and S21 from extracted M Matrix ....');
-    
-    for f = freq_start : step_size : freq_end
-    waitbar((f-freq_start)/(freq_end-freq_start), WB2,'Calculating S11 and S21 from extracted M Matrix ....');
+%% Plot S Parameters from Network Extraction
 
-    lambda = f0/Bandwidth*(f/f0-f0/f);
+    if Plot_S_from_extracted_M_matrix && ~failed
+        step_size = (freq_end-freq_start)/steps;
+        
+        R = zeros(N, N);
+        R(1,1) = RS;
+        R(end, end) = RL;
+        
+        S11_M_matrix = zeros(1, steps + 1);
+        S21_M_matrix = zeros(1, steps + 1);
+        
+        WB3 = waitbar(0,'Calculating S11 and S21 from extracted M Matrix ....');
+        
+        for f = freq_start : step_size : freq_end
+        waitbar((f-freq_start)/(freq_end-freq_start), WB3,'Calculating S11 and S21 from extracted M Matrix ....');
     
-    A = lambda*eye(N) - 1i*R + scaled_M_matrix;
-    A_inv = A^(-1);
+        lambda = center_freq/Bandwidth*(f/center_freq-center_freq/f);
+        
+        A_matrix = lambda*eye(N) - 1i*R + scaled_M_matrix;
+        A_matrix_inv = A_matrix^(-1);
+        
+        S11_M_matrix((f - freq_start)/step_size + 1) = 1 + 2*1i*RS*A_matrix_inv(1,1);
+        S21_M_matrix(round((f - freq_start)/step_size + 1)) = -2*1i*sqrt(RS*RL)*A_matrix_inv(N,1);
+        end
     
-    S11((f - freq_start)/step_size + 1) = 1 + 2*1i*RS*A_inv(1,1);
-    S21(round((f - freq_start)/step_size + 1)) = -2*1i*sqrt(RS*RL)*A_inv(N,1);
+        close(WB3)
+        
+        freq = linspace(freq_start, freq_end, steps + 1);
+        
+        figure;
+        ref = plot(freq, 20*log10(abs(S11_M_matrix)));
+        hold on
+        trans = plot(freq, 20*log10(abs(S21_M_matrix)));
+        hold off
+        
+        legend([ref, trans], "S11", "S21")
+        xlabel("Frequency (Hz)")
+        ylabel("dB")
+        title("Extracted M Matrix S11 S21 vs Frequency")
     end
-
-    close(WB2)
-    
-    freq = linspace(freq_start, freq_end, steps + 1);
-    
-    figure;
-    ref = plot(freq, 20*log10(abs(S11)));
-    hold on
-    trans = plot(freq, 20*log10(abs(S21)));
-    hold off
-    
-    legend([ref, trans], "S11", "S21")
-    xlabel("Normalized Frequency (rad)")
-    ylabel("dB")
-    title("Extracted M Matrix S11 S21 vs Frequency")
-
 
 
 else
 end
 
+
+
+
+%% Functions
+
+
+function array_done = pad2N_inf(array, N)
+    array_done = zeros(1,N+1);
+    length = size(array,2);
+    array_done(N-length+2:N+1) = array;
+    array_done(1:N-length+1) = inf;
+end
 
 
 function array_done = pad2N(array)
@@ -255,7 +286,7 @@ end
 
 function [A, B, C, D, P] = series_unit_INV_extraction(Ain, Bin, Cin, Din, Pin)
     global working_node M_matrix N
-    [~, index_last_element, row, ~] = find_index_and_row(Ain);
+    [~, index_last_element, row] = find_index_and_row(Ain);
 
     A_current_sym = -1i*Cin(row, index_last_element);
     B_current_sym = -1i*Din(row, index_last_element);
@@ -294,7 +325,7 @@ end
 
 function [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_Cin, Ain, Bin, Cin, Din, Pin)
     global working_node
-    [~, index_last_element, row, ~] = find_index_and_row(Ain);
+    [~, index_last_element, row] = find_index_and_row(Ain);
 
 %     disp("input of C extraction")
 %     sym2poly(Din(row, index_last_element))
@@ -321,7 +352,7 @@ end
 
 function [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_Bin, Ain, Bin, Cin, Din, Pin)
     global working_node
-    [~, index_last_element, row, ~] = find_index_and_row(Ain);
+    [~, index_last_element, row] = find_index_and_row(Ain);
     
     syms s
     B_current = imag(double(limit(noise_suppress(Din(row, index_last_element))/noise_suppress(Bin(row, index_last_element)), s, inf)));
@@ -346,7 +377,7 @@ function [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_Bin, Ain, Bin, Ci
 end
 
 function [A, B, C, D, P] = reverse(Ain, Bin, Cin, Din, Pin)
-    [~, index_last_element, row, ~] = find_index_and_row(Ain);
+    [~, index_last_element, row] = find_index_and_row(Ain);
 
 %     sym2poly(Ain(row, index_last_element))
 %     sym2poly(Bin(row, index_last_element))
@@ -367,7 +398,7 @@ end
 
 function [A, B, C, D, P] = parallel_INV_extraction(Ain, Bin, Cin, Din, Pin)
     global working_node ending_node M_matrix remaining_cross_connection_matrix
-    [~, index_last_element, row, ~] = find_index_and_row(Ain);
+    [~, index_last_element, row] = find_index_and_row(Ain);
 
     syms s
     M_parallel_current = double(limit(-1*noise_suppress(Pin(row, index_last_element))/noise_suppress(Bin(row, index_last_element)), s, inf));
@@ -387,7 +418,7 @@ end
 
 
 function [A, B, C, D, P] = store_ABCD(Ain, Bin, Cin, Din, Pin, A_current_sym, B_current_sym, C_current_sym, D_current_sym, P_current_sym, reverse_flag)
-    [index_to_write, ~, row, both] = find_index_and_row(Ain);
+    [index_to_write, ~, row] = find_index_and_row(Ain);
 
     A = Ain;
     B = Bin;
@@ -397,51 +428,45 @@ function [A, B, C, D, P] = store_ABCD(Ain, Bin, Cin, Din, Pin, A_current_sym, B_
     
 %     sym2poly(C_current_sym)
 
+    deleted = 0;
+
     if reverse_flag
         index_to_write = index_to_write - 1;
         if row == 1
-            if both
-                row = 4;
-            else
-                row = 2;
-            end
+           row = 2;
+           if is_A_Occupied(Ain, 2, index_to_write)
+               [A, B, C, D, P] = delete_ABCD(A, B, C, D, P, 1, index_to_write);
+               deleted = 1;
+           end
+
         else
-            if both
-                row = 3;
-            else
-                row = 1;
-            end
+           row = 1;
+           if is_A_Occupied(Ain, 1, index_to_write)
+               [A, B, C, D, P] = delete_ABCD(A, B, C, D, P, 2, index_to_write);
+               deleted = 1;
+           end
         end
     end
 
-    A(row, index_to_write) = A_current_sym;
-    B(row, index_to_write) = B_current_sym;
-    C(row, index_to_write) = C_current_sym;
-    D(row, index_to_write) = D_current_sym;
-    P(row, index_to_write) = P_current_sym;
+    if ~deleted
+        A(row, index_to_write) = A_current_sym;
+        B(row, index_to_write) = B_current_sym;
+        C(row, index_to_write) = C_current_sym;
+        D(row, index_to_write) = D_current_sym;
+        P(row, index_to_write) = P_current_sym;
+    end
 end
 
 
 
-function [index_to_write, index_last_element, row, both] = find_index_and_row(Ain)
+function [index_to_write, index_last_element, row] = find_index_and_row(Ain)
     global TOTAL_NUM_EXTRACTION
     index_to_write = 1;
-    both = 0;
-    force_row1 = 0;
-    force_row2 = 0;
     
     for i = 1:1:TOTAL_NUM_EXTRACTION + 1
-        if (strcmp(string(Ain(1,i)),"A1_" + string(i))) && (strcmp(string(Ain(2,i)),"A2_" + string(i)))
+        if ~is_A_Occupied(Ain, 1, i) && ~is_A_Occupied(Ain, 2, i)
             index_to_write = i;
             break
-        end
-    end
-
-    if index_to_write ~= 1
-        if ~strcmp(string(Ain(3,index_to_write - 1)),"A3_" + string(index_to_write - 1))
-            force_row1 = 1;
-        elseif ~strcmp(string(Ain(4,index_to_write - 1)),"A4_" + string(index_to_write - 1))
-            force_row2 = 1;
         end
     end
 
@@ -449,9 +474,8 @@ function [index_to_write, index_last_element, row, both] = find_index_and_row(Ai
     last_vacant_col = 1;
     if index_to_write ~= 1
         for j = 1:1:index_to_write - 1
-            if ~strcmp(string(Ain(1,index_to_write - j)),"A1_" + string(index_to_write - j)) && ~strcmp(string(Ain(2,index_to_write - j)),"A2_" + string(index_to_write - j))
+            if is_A_Occupied(Ain, 1, index_to_write - j) && is_A_Occupied(Ain, 2, index_to_write - j)
                  num_sequential_full_col =  num_sequential_full_col + 1;
-                 both = 1;
             else
                 last_vacant_col = index_to_write - j;
                 break
@@ -459,17 +483,15 @@ function [index_to_write, index_last_element, row, both] = find_index_and_row(Ai
         end
     end
 
-    if ~strcmp(string(Ain(1,last_vacant_col)),"A1_" + string(last_vacant_col))
+    if is_A_Occupied(Ain, 1, last_vacant_col)
         last_vacant_row = 2;
     else
         last_vacant_row = 1;
     end
 
 
-    if index_to_write == 1 || force_row1 == 1
+    if index_to_write == 1
         row = 1;
-    elseif force_row2 == 1
-        row = 2;
     elseif mod(num_sequential_full_col, 2) ~= 0
         row = last_vacant_row;
     else
@@ -517,4 +539,22 @@ function working_node = next_working_node(working_node_current, Extracted_C)
             working_node = working_node_current - 1;
         end
     end
+end
+
+function occupied = is_A_Occupied(Ain, row, col)
+    occupied = ~strcmp(string(Ain(row,col)),"A" + string(row) + "_" + string(col));
+end
+
+function [A, B, C, D, P] = delete_ABCD(Ain, Bin, Cin, Din, Pin, row, col)
+    A = Ain;
+    B = Bin;
+    C = Cin;
+    D = Din;
+    P = Pin;
+    
+    A(row, col) = sym("A" + string(row) + "_" + string(col));
+    B(row, col) = sym("B" + string(row) + "_" + string(col));
+    C(row, col) = sym("C" + string(row) + "_" + string(col));
+    D(row, col) = sym("D" + string(row) + "_" + string(col));
+    P(row, col) = sym("P" + string(row) + "_" + string(col));
 end
