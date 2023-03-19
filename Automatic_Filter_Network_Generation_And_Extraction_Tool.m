@@ -1,15 +1,24 @@
 global limit_noise_suppressor N M_matrix cross_connection_matrix remaining_cross_connection_matrix B_enable TOTAL_NUM_EXTRACTION working_node ending_node
 
 %% Filter Setup
-N = 4;              % Filter order
-RL = 24;            % Filter Return Loss (dB)
-TZ = [1.5 -1.5];    % Array of frequencies of transmittion zeros (rad/s)
+N = 3;              % Filter order
+RL = 23;            % Filter Return Loss (dB)
+TZ = [inf];    % Array of frequencies of transmittion zeros (rad/s)
                     % For transmission zeros at infinity, type "inf"
 
 %% Simulation Setup
 Polynomial_Solver = "recursive";                                    % Choose between recursive solver and numerical solver for polynomial generation
 Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
 Network_Extraction_Force_Ending_With_Cross_Coupling = true;         % Force the ending coupling to be extracted as cross coupling
+
+%% Debugging Tool                                        
+                                                         % The two rows in the ABCDP matrixes represents the direction of the expression. 
+                                                         % Row 1 contains expressions for forward direction while row 2 constains expressions for reverse direction. 
+                                                         % Each expression in the ABCDP matrixes represent the remaining ABCDP expressions after (column - 1) extractions 
+                                                         % or each of the ABCDP expression is used for (column)th extraction.
+
+Enable_ABCDP_simplification = true;                      % Enable simplification of the ABCD and P expressions for easier understanding
+round_to_decimal_places = 3;                             % Number of decimal places to round to in simplification
 
 %% Plotting Setup
 Plot_S_from_polynomials = true;             % Enable to plot S11 and S21 from the polynomials
@@ -206,10 +215,7 @@ if Enable_Network_Extraction
     B_enable = readmatrix("B_enable.csv");
     cross_connection_matrix = readmatrix("cross_connection_matrix.csv");
     remaining_cross_connection_matrix = cross_connection_matrix;
-    if all(~cross_connection_matrix, 'all')
-        msgbox("Connection matrix is empty.", "Warning", "warn");
-        valid = 0;
-    elseif N~=size(B_enable, 2)
+    if N~=size(B_enable, 2)
         msgbox("Size of imported FIR components doen't match with the filter order.", "Warning", "warn");
         valid = 0;
     elseif N ~=size(cross_connection_matrix, 2)
@@ -241,6 +247,7 @@ if Enable_Network_Extraction
         C = sym('C',[2 TOTAL_NUM_EXTRACTION + 1]);
         D = sym('D',[2 TOTAL_NUM_EXTRACTION + 1]);
         P = sym('P',[2 TOTAL_NUM_EXTRACTION + 1]);
+
         Extracted_C = zeros(1, N);
         Extracted_B = zeros(1, N);
         
@@ -260,7 +267,11 @@ if Enable_Network_Extraction
         for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
             waitbar(CURRENT_NUM_EXTRACTION/TOTAL_NUM_EXTRACTION, WB2,'Extracting network components ....');
             if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
-                [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                if isEven(N)
+                    [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                else
+                    [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                end
             elseif Extracted_C(working_node) == 0
                 [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
             elseif  B_enable(working_node) == 1 && Extracted_B(working_node) == 0
@@ -301,7 +312,21 @@ if Enable_Network_Extraction
         end
         close(WB2)
     
+
+        if Enable_ABCDP_simplification
+            for i = 1:1:2
+                for j = 1:1:TOTAL_NUM_EXTRACTION + 1
+                    A_simplified(i, j) = vpa(poly2sym(round(sym2poly(A(i,j)), round_to_decimal_places), s));
+                    B_simplified(i, j) = vpa(poly2sym(round(sym2poly(B(i,j)), round_to_decimal_places), s));
+                    C_simplified(i, j) = vpa(poly2sym(round(sym2poly(C(i,j)), round_to_decimal_places), s));
+                    D_simplified(i, j) = vpa(poly2sym(round(sym2poly(D(i,j)), round_to_decimal_places), s));
+                    P_simplified(i, j) = vpa(poly2sym(round(sym2poly(P(i,j)), round_to_decimal_places), s));
+                end
+            end
+        end
         
+        
+
         for i = 1:1:N
             if Extracted_C(i) == 0
                 failed = 1;
@@ -731,4 +756,8 @@ function [A, B, C, D, P] = delete_ABCD(Ain, Bin, Cin, Din, Pin, row, col)
     C(row, col) = sym("C" + string(row) + "_" + string(col));
     D(row, col) = sym("D" + string(row) + "_" + string(col));
     P(row, col) = sym("P" + string(row) + "_" + string(col));
+end
+
+function boolean1 = isEven(N)
+    boolean1 = mod(N, 2) == 0;
 end

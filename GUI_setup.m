@@ -1,40 +1,89 @@
 global cross_connection_matrix B_enable N
 
 %% Filter Order Setup
-N = 4;
+N = 3;
 
 %% GUI
 cross_connection_matrix = zeros(N, N);
 B_enable = ones(1, N);
 
-window_width = (ceil(N/2) + 1)*230;
-num_of_elements = ceil(N/2);
 
-% Create a figure window:
-GUI = uifigure('Position',[500 500 window_width 400],'Name','Filter Connection Options');
+if isEven(N)
+    window_width = (ceil(N/2) + 1)*230;
+    num_of_elements = ceil(N/2);
+    
+    % Create a figure window:
+    GUI = uifigure('Position',[500 500 window_width 400],'Name','Filter Connection Options');
+    
+    uitextarea('Parent', GUI, 'Position',[60 290 100 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', "Source");
+    uitextarea('Parent', GUI, 'Position',[60 110 100 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', "Load");
 
-uitextarea('Parent', GUI, 'Position',[60 290 100 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', "Source" );
-for element = 1:1:num_of_elements
-    uitextarea('Parent', GUI, 'Position',[200+230*(element-1) 300 150 6], 'BackgroundColor','black' );
-    uitextarea('Parent', GUI, 'Position',[370+230*(element-1) 290 30 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', string(element) );
-end
-uitextarea('Parent', GUI, 'Position',[60 110 100 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', "Load" );
-for element = 1:1:num_of_elements
-    uitextarea('Parent', GUI, 'Position',[200+230*(element-1) 120 150 6], 'BackgroundColor','black' );
-    uitextarea('Parent', GUI, 'Position',[370+230*(element-1) 110 30 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', string(N - element + 1) );
-end
-uitextarea('Parent', GUI, 'Position',[window_width-77 150 6 130], 'BackgroundColor','black' );
+    for element = 1:1:num_of_elements
+        uitextarea('Parent', GUI, 'Position',[200+230*(element-1) 300 150 6], 'BackgroundColor','black' );
+        uitextarea('Parent', GUI, 'Position',[370+230*(element-1) 290 30 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', string(element));
+    end
+    
+    for element = 1:1:num_of_elements
+        uitextarea('Parent', GUI, 'Position',[200+230*(element-1) 120 150 6], 'BackgroundColor','black' );
+        uitextarea('Parent', GUI, 'Position',[370+230*(element-1) 110 30 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', string(N - element + 1));
+    end
+    
+    uitextarea('Parent', GUI, 'Position',[window_width-77 150 6 130], 'BackgroundColor','black' );
+    
+    for element = 1:1:num_of_elements
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 330 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(element), 'Value', 1);
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 85 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(N - element + 1), 'Value', 1);
+    end
+    
+    num_of_elements = ceil(N/2) - 1;
+    for element = 1:1:num_of_elements
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 205 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element)+string(N - element + 1));
+    cbx = uicheckbox(GUI,'Position',[500+230*(element-1) 215 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element)+string(N - element));
+    cbx = uicheckbox(GUI,'Position',[500+230*(element-1) 190 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element+1)+string(N - element + 1));
+    end
+else
+    window_width = (ceil(N/2) + 1)*230 + 40;
+    num_of_elements = ceil(N/2) - 1;
+    
+    % Create a figure window:
+    GUI = uifigure('Position',[500 500 window_width 400],'Name','Filter Connection Options');
+    
+    uitextarea('Parent', GUI, 'Position',[60 290 100 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', "Source");
+    uitextarea('Parent', GUI, 'Position',[60 110 100 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', "Load");
 
-for element = 1:1:num_of_elements
-cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 330 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(element), 'Value', 1);
-cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 85 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(N - element + 1), 'Value', 1);
-end
+    for element = 1:1:num_of_elements
+        uitextarea('Parent', GUI, 'Position',[200+230*(element-1) 300 150 6], 'BackgroundColor','black' );
+        uitextarea('Parent', GUI, 'Position',[370+230*(element-1) 290 30 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', string(element));
+    end
+    
+    uitextarea('Parent', GUI, 'Position',[370+230*(ceil(N/2)-1) 197 30 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', string(ceil(N/2)));
 
-num_of_elements = ceil(N/2) - 1;
-for element = 1:1:num_of_elements
-cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 205 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element)+string(N - element + 1));
-cbx = uicheckbox(GUI,'Position',[500+230*(element-1) 215 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element)+string(N - element));
-cbx = uicheckbox(GUI,'Position',[500+230*(element-1) 190 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element+1)+string(N - element + 1));
+    for element = 1:1:num_of_elements
+        uitextarea('Parent', GUI, 'Position',[200+230*(element-1) 120 150 6], 'BackgroundColor','black' );
+        uitextarea('Parent', GUI, 'Position',[370+230*(element-1) 110 30 30], 'BackgroundColor','black', 'FontColor', 'white', 'FontSize', 20, 'HorizontalAlignment', 'center', 'Value', string(N - element + 1));
+    end
+    
+    uitextarea('Parent', GUI, 'Position',[200+230*(ceil(N/2)-1) 300 189 6], 'BackgroundColor','black' );
+    uitextarea('Parent', GUI, 'Position',[window_width-117 250 6 50], 'BackgroundColor','black' );
+    uitextarea('Parent', GUI, 'Position',[window_width-117 120 6 50], 'BackgroundColor','black' );
+    uitextarea('Parent', GUI, 'Position',[200+230*(ceil(N/2)-1) 120 189 6], 'BackgroundColor','black' );
+
+    for element = 1:1:num_of_elements
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 330 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(element), 'Value', 1);
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 85 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(N - element + 1), 'Value', 1);
+    end
+    
+    cbx = uicheckbox(GUI,'Position',[412+230*(ceil(N/2)-1) 205 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(ceil(N/2)), 'Value', 1);
+
+    num_of_elements = ceil(N/2) - 1;
+    for element = 1:1:num_of_elements
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 205 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element)+string(N - element + 1));
+    if element ~= num_of_elements
+        cbx = uicheckbox(GUI,'Position',[500+230*(element-1) 215 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element)+string(N - element));
+        cbx = uicheckbox(GUI,'Position',[500+230*(element-1) 190 102 15], 'ValueChangedFcn',@(cbx,event) CouplingChanged(cbx), 'Text', "M"+string(element+1)+string(N - element + 1));
+    end
+    end
+
 end
 
 bt = uibutton(GUI,'Position',[round(window_width)/2-50 20 100 30], "Text", "OK","ButtonPushedFcn", @(bt,event) ButtonPushed(bt));
@@ -87,4 +136,8 @@ function ButtonPushed(bt)
         msgbox('Cross connection matrix and FIR components are exported.','Success');
         close(bt.Parent);
     end
+end
+
+function boolean1 = isEven(N)
+    boolean1 = mod(N, 2) == 0;
 end
