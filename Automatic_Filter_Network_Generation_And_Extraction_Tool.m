@@ -1,15 +1,15 @@
 global limit_noise_suppressor N M_matrix cross_connection_matrix remaining_cross_connection_matrix B_enable TOTAL_NUM_EXTRACTION working_node ending_node
 
 %% Filter Setup
-N = 4;              % Filter order
-RL = 24;            % Filter Return Loss (dB)
-TZ = [1.5 -1.5];    % Array of frequencies of transmittion zeros (rad/s)
-                    % For transmission zeros at infinity, type "inf"
+N = 4;                          % Filter order
+RL = 24;                        % Filter Return Loss (dB)
+TZ = [1.5 -1.5];                % Array of frequencies of transmittion zeros (rad/s)
+                                % For transmission zeros at infinity, type "inf"
 
 %% Simulation Setup
 Polynomial_Solver = "recursive";                                    % Choose between recursive solver and numerical solver for polynomial generation
-Enable_Network_Extraction = false;                                   % Enable Network Extraction and generate M matrix
-Network_Extraction_Force_Ending_With_Cross_Coupling = true;         % Force the ending coupling to be extracted as cross coupling
+Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
+Network_Extraction_Force_Ending_With_Cross_Coupling = false;         % Force the ending coupling to be extracted as cross coupling
 
 Find_Extraction_Solution_Fast = true;
 Find_Extraction_Solution_All = false;
@@ -26,7 +26,7 @@ Enable_ABCDP_simplification = true;                      % Enable simplification
 round_to_decimal_places = 3;                             % Number of decimal places to round to in simplification
 
 %% Plotting Setup
-Plot_S_from_polynomials = false;             % Enable to plot S11 and S21 from the polynomials
+Plot_S_from_polynomials = true;             % Enable to plot S11 and S21 from the polynomials
 normalized_freq_start = -3;                 % Start frequency (rad/s)
 normalized_freq_end = 3;                    % End frequency (rad/s)
 
@@ -82,6 +82,12 @@ if Polynomial_Solver == "recursive"
     FW_sym = poly2sym(FW, w);
     FS_sym = subs(FW_sym, w, -1i*s);
     FS = sym2poly(FS_sym);
+    
+    if FS(1) ~= 1
+        FS = FS/FS(1);
+        FS_sym = poly2sym(FS, s);
+    end
+
     FS = pad2N(FS);
 
 elseif Polynomial_Solver == "numerical"
@@ -126,6 +132,12 @@ elseif Polynomial_Solver == "numerical"
     FW_sym = poly2sym(FW, w);
     FS_sym = subs(FW_sym, w, -1i*s);
     FS = sym2poly(FS_sym);
+
+    if FS(1) ~= 1
+        FS = FS/FS(1);
+        FS_sym = poly2sym(FS, s);
+    end
+
     FS = pad2N(FS);
 else
     warndlg('Please choose a valid solver.','Warning');
@@ -138,13 +150,13 @@ waitbar(0.5, WB0,'Generating filter polynomials ....');
 epsilon = abs(double(1/sqrt(10^(RL/10)-1)*subs(PW_sym, w, 1)/subs(FW_sym, w, 1)));
 reference_epsilon = double(1/sqrt(10^(RL/10)-1));
 
-%ES2 = conv(PS, (PS))/epsilon^2 + conv(FS, (FS));
+ES2 = conv(PS, PS)/epsilon^2 + conv(FS, FS);
 % INTER1 = conv(PS, conj(PS))/epsilon^2;
 % INTER2 = conv(FS, conj(FS));
-ES2 = conv(PS, conj(PS))/epsilon^2 + conv(FS, conj(FS));
+%ES2 = conv(PS, conj(PS))/epsilon^2 + conv(FS, conj(FS));
 ES2_sym = poly2sym(ES2, s);
 ES2_roots = roots(ES2);
-ES_roots = ES2_roots(real(ES2_roots)<0);
+ES_roots = ES2_roots(real(ES2_roots)<-1e-8);
 %ES_roots = ES2_roots(1:2);
 
 waitbar(0.75, WB0,'Generating filter polynomials ....');
@@ -159,6 +171,7 @@ else
     ES = poly(ES_roots);
 end
 
+%ES = poly(ES_roots);
 %reference_ES2 = conv(ES, conj(ES));
 % reference_ES2_roots = roots(reference_ES2);
 ES_sym = poly2sym(ES, s);
@@ -276,38 +289,38 @@ if Enable_Network_Extraction
                 end
             elseif Extracted_C(working_node) == 0
                 [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
-            elseif  B_enable(working_node) == 1 && Extracted_B(working_node) == 0
+            elseif B_enable(working_node) == 1 && Extracted_B(working_node) == 0
                 [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_B, A, B, C, D, P);
-            else
+            elseif Extracted_C(ending_node) == 0
                 [A, B, C, D, P] = reverse(A, B, C, D, P);
                 [working_node, ending_node] = swap(working_node, ending_node);
-                if Extracted_C(working_node) == 0
-                    [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
-                elseif  B_enable(working_node) == 1 && Extracted_B(working_node) == 0
-                    [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_B, A, B, C, D, P);
-                elseif cross_connection_matrix(working_node, ending_node) == 1 && M_matrix(working_node, ending_node) == 0
-                    [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
+            elseif B_enable(ending_node) == 1 && Extracted_B(ending_node) == 0
+                [A, B, C, D, P] = reverse(A, B, C, D, P);
+                [working_node, ending_node] = swap(working_node, ending_node);
+                [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_B, A, B, C, D, P);
+            elseif cross_connection_matrix(working_node, ending_node) == 1 && M_matrix(working_node, ending_node) == 0
+                [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+            else
+                working_connection = sum(remaining_cross_connection_matrix(working_node, :), "all");
+                ending_connection = sum(remaining_cross_connection_matrix(ending_node, :), "all");
+                if working_connection>ending_connection
+                    [A, B, C, D, P] = reverse(A, B, C, D, P);
+                    [working_node, ending_node] = swap(working_node, ending_node);
+                    [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                    working_node = next_working_node(working_node, Extracted_C);
+                elseif working_connection<ending_connection
+                    [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                    working_node = next_working_node(working_node, Extracted_C);
                 else
-                    working_connection = sum(remaining_cross_connection_matrix(working_node, :), "all");
-                    ending_connection = sum(remaining_cross_connection_matrix(ending_node, :), "all");
-                    if working_connection>ending_connection
+                    if (abs(next_working_node(working_node, Extracted_C) - (N+1-ending_node)) >= 2) || (Network_Extraction_Force_Ending_With_Cross_Coupling && ((working_node>ceil(N/2) && next_working_node(working_node, Extracted_C)<=ceil(N/2)) || (working_node<=ceil(N/2) && next_working_node(working_node, Extracted_C)>ceil(N/2)))) 
                         [A, B, C, D, P] = reverse(A, B, C, D, P);
                         [working_node, ending_node] = swap(working_node, ending_node);
                         [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
                         working_node = next_working_node(working_node, Extracted_C);
-                    elseif working_connection<ending_connection
+                    else
                         [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
                         working_node = next_working_node(working_node, Extracted_C);
-                    else
-                        if (abs(next_working_node(working_node, Extracted_C) - (N+1-ending_node)) >= 2) || (Network_Extraction_Force_Ending_With_Cross_Coupling && ((working_node>ceil(N/2) && next_working_node(working_node, Extracted_C)<=ceil(N/2)) || (working_node<=ceil(N/2) && next_working_node(working_node, Extracted_C)>ceil(N/2)))) 
-                            [A, B, C, D, P] = reverse(A, B, C, D, P);
-                            [working_node, ending_node] = swap(working_node, ending_node);
-                            [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
-                            working_node = next_working_node(working_node, Extracted_C);
-                        else
-                            [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
-                            working_node = next_working_node(working_node, Extracted_C);
-                        end
                     end
                 end
             end
@@ -511,7 +524,7 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
                     [A, B, C, D, P] = reverse(A, B, C, D, P);
                     [working_node, ending_node] = swap(working_node, ending_node);
                 
-                    for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
+                     for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
                         if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
                             if isEven(N)
                                 [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
@@ -520,38 +533,38 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
                             end
                         elseif Extracted_C(working_node) == 0
                             [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
-                        elseif  B_enable(working_node) == 1 && Extracted_B(working_node) == 0
+                        elseif B_enable(working_node) == 1 && Extracted_B(working_node) == 0
                             [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_B, A, B, C, D, P);
-                        else
+                        elseif Extracted_C(ending_node) == 0
                             [A, B, C, D, P] = reverse(A, B, C, D, P);
                             [working_node, ending_node] = swap(working_node, ending_node);
-                            if Extracted_C(working_node) == 0
-                                [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
-                            elseif  B_enable(working_node) == 1 && Extracted_B(working_node) == 0
-                                [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_B, A, B, C, D, P);
-                            elseif cross_connection_matrix(working_node, ending_node) == 1 && M_matrix(working_node, ending_node) == 0
-                                [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                            [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
+                        elseif B_enable(ending_node) == 1 && Extracted_B(ending_node) == 0
+                            [A, B, C, D, P] = reverse(A, B, C, D, P);
+                            [working_node, ending_node] = swap(working_node, ending_node);
+                            [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_B, A, B, C, D, P);
+                        elseif cross_connection_matrix(working_node, ending_node) == 1 && M_matrix(working_node, ending_node) == 0
+                            [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                        else
+                            working_connection = sum(remaining_cross_connection_matrix(working_node, :), "all");
+                            ending_connection = sum(remaining_cross_connection_matrix(ending_node, :), "all");
+                            if working_connection>ending_connection
+                                [A, B, C, D, P] = reverse(A, B, C, D, P);
+                                [working_node, ending_node] = swap(working_node, ending_node);
+                                [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                                working_node = next_working_node(working_node, Extracted_C);
+                            elseif working_connection<ending_connection
+                                [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                                working_node = next_working_node(working_node, Extracted_C);
                             else
-                                working_connection = sum(remaining_cross_connection_matrix(working_node, :), "all");
-                                ending_connection = sum(remaining_cross_connection_matrix(ending_node, :), "all");
-                                if working_connection>ending_connection
+                                if (abs(next_working_node(working_node, Extracted_C) - (N+1-ending_node)) >= 2) || (Network_Extraction_Force_Ending_With_Cross_Coupling && ((working_node>ceil(N/2) && next_working_node(working_node, Extracted_C)<=ceil(N/2)) || (working_node<=ceil(N/2) && next_working_node(working_node, Extracted_C)>ceil(N/2)))) 
                                     [A, B, C, D, P] = reverse(A, B, C, D, P);
                                     [working_node, ending_node] = swap(working_node, ending_node);
                                     [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
                                     working_node = next_working_node(working_node, Extracted_C);
-                                elseif working_connection<ending_connection
+                                else
                                     [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
                                     working_node = next_working_node(working_node, Extracted_C);
-                                else
-                                    if (abs(next_working_node(working_node, Extracted_C) - (N+1-ending_node)) >= 2) || (Network_Extraction_Force_Ending_With_Cross_Coupling && ((working_node>ceil(N/2) && next_working_node(working_node, Extracted_C)<=ceil(N/2)) || (working_node<=ceil(N/2) && next_working_node(working_node, Extracted_C)>ceil(N/2)))) 
-                                        [A, B, C, D, P] = reverse(A, B, C, D, P);
-                                        [working_node, ending_node] = swap(working_node, ending_node);
-                                        [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
-                                        working_node = next_working_node(working_node, Extracted_C);
-                                    else
-                                        [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
-                                        working_node = next_working_node(working_node, Extracted_C);
-                                    end
                                 end
                             end
                         end
@@ -1029,19 +1042,19 @@ function sweeping_cross_connection_matrix = generate_cross_connection_matrix(con
     sweeping_cross_connection_matrix = zeros(N, N);
 
     for i = 1:1:size(connection_choise, 2)
-        group_number = ceil(i/3);
-        group_index = i - 3*(group_number - 1);
-        if group_index == 1 || group_index == 2
-            row = group_number;
-        else
-            row = group_number + 1;
-        end
-        if group_index == 1 || group_index == 3
-            column = N - group_number + 1;
-        else
-            column = N - group_number;
-        end
         if connection_choise(i) == 1
+            group_number = ceil(i/3);
+            group_index = i - 3*(group_number - 1);
+            if group_index == 1 || group_index == 2
+                row = group_number;
+            else
+                row = group_number + 1;
+            end
+            if group_index == 1 || group_index == 3
+                column = N - group_number + 1;
+            else
+                column = N - group_number;
+            end
             sweeping_cross_connection_matrix(row, column) = 1;
             sweeping_cross_connection_matrix(column, row) = 1;
         end
