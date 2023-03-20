@@ -1,7 +1,7 @@
 global cross_connection_matrix B_enable N
 
 %% Filter Order Setup
-N = 3;
+N = 4;
 
 %% GUI
 cross_connection_matrix = zeros(N, N);
@@ -121,13 +121,12 @@ end
 function ButtonPushed(bt)
     global cross_connection_matrix B_enable N
     num_of_elements = ceil(N/2) - 1;
-    valid = 0;
+    valid = 1;
     for element = 1:1:num_of_elements
         if cross_connection_matrix(element, N - element) == 1 && cross_connection_matrix(element+1, N - element + 1) == 1
             msgbox('Crossing diagonal couplings cannot be enabled at the same time.','Warning', 'warn');
+            valid = 0;
             break
-        else
-            valid = 1;
         end
     end
     if valid

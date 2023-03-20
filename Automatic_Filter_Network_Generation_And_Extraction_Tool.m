@@ -1,15 +1,20 @@
 global limit_noise_suppressor N M_matrix cross_connection_matrix remaining_cross_connection_matrix B_enable TOTAL_NUM_EXTRACTION working_node ending_node
 
 %% Filter Setup
-N = 3;              % Filter order
-RL = 23;            % Filter Return Loss (dB)
-TZ = [inf];    % Array of frequencies of transmittion zeros (rad/s)
+N = 4;              % Filter order
+RL = 24;            % Filter Return Loss (dB)
+TZ = [1.5 -1.5];    % Array of frequencies of transmittion zeros (rad/s)
                     % For transmission zeros at infinity, type "inf"
 
 %% Simulation Setup
 Polynomial_Solver = "recursive";                                    % Choose between recursive solver and numerical solver for polynomial generation
-Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
+Enable_Network_Extraction = false;                                   % Enable Network Extraction and generate M matrix
 Network_Extraction_Force_Ending_With_Cross_Coupling = true;         % Force the ending coupling to be extracted as cross coupling
+
+Find_Extraction_Solution_Fast = true;
+Find_Extraction_Solution_All = false;
+target_num_solution = 1;
+limit_noise_suppressor = 1e-3;
 
 %% Debugging Tool                                        
                                                          % The two rows in the ABCDP matrixes represents the direction of the expression. 
@@ -21,7 +26,7 @@ Enable_ABCDP_simplification = true;                      % Enable simplification
 round_to_decimal_places = 3;                             % Number of decimal places to round to in simplification
 
 %% Plotting Setup
-Plot_S_from_polynomials = true;             % Enable to plot S11 and S21 from the polynomials
+Plot_S_from_polynomials = false;             % Enable to plot S11 and S21 from the polynomials
 normalized_freq_start = -3;                 % Start frequency (rad/s)
 normalized_freq_end = 3;                    % End frequency (rad/s)
 
@@ -205,12 +210,11 @@ end
 
 if Enable_Network_Extraction
     M_matrix = zeros(N, N);
-    limit_noise_suppressor = 1e-3;
     TOTAL_NUM_EXTRACTION = 0;
     working_node = 0;
     ending_node = N + 1;
     
-    valid = 0;
+    valid = 1;
     
     B_enable = readmatrix("B_enable.csv");
     cross_connection_matrix = readmatrix("cross_connection_matrix.csv");
@@ -228,8 +232,6 @@ if Enable_Network_Extraction
                 msgbox('Crossing diagonal couplings cannot be enabled at the same time.','Warning', 'warn');
                 valid = 0;
                 break
-            else
-                valid = 1;
             end
         end
     end
@@ -326,13 +328,12 @@ if Enable_Network_Extraction
         end
         
         
-
+        failed = 0;
         for i = 1:1:N
             if Extracted_C(i) == 0
                 failed = 1;
                 break;
             end
-            failed = 0;
         end
 
         if failed
@@ -414,6 +415,265 @@ if Enable_Network_Extraction
     else
     end
 end
+
+
+
+%% Automatic Find Solution
+
+if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
+
+    current_trial_successful = 0;
+    num_solution_found = 0;
+    found_cross_connection_matrix = zeros(N, N, target_num_solution);
+    found_B_enable = zeros(target_num_solution, N);
+    found_M_matrix = zeros(N, N, target_num_solution);
+    found_Extracted_C = zeros(target_num_solution, N);
+    found_Extracted_B = zeros(target_num_solution, N);
+
+    All_possible_B_enable = reshape((dec2bin(0:2^N-1)-'0'),[], N);
+
+    if isEven(N)
+        num_choices_cross_connections = (ceil(N/2) - 1)*3;
+    else
+        num_choices_cross_connections = (ceil(N/2) - 1)*3 - 2;
+    end
+    
+    All_possible_cross_connections = reshape((dec2bin(0:2^num_choices_cross_connections-1)-'0'),[], num_choices_cross_connections);
+
+    TOTAL_NUM_TRIAL_CROSS_CONNECTION = size(All_possible_cross_connections, 1);
+
+    if Find_Extraction_Solution_Fast
+        TOTAL_NUM_TRIAL_B = 2;
+    else
+        TOTAL_NUM_TRIAL_B = size(All_possible_B_enable, 1);
+    end
+
+    WB4 = waitbar(0,'Finding network extraction solution ....');
+
+    for CURRENT_NUM_TRIAL_B = 1:1:TOTAL_NUM_TRIAL_B
+
+        if Find_Extraction_Solution_Fast && CURRENT_NUM_TRIAL_B == 1
+            B_enable = zeros(1, N);
+        elseif Find_Extraction_Solution_Fast && CURRENT_NUM_TRIAL_B == 2
+            B_enable = ones(1, N);
+        else
+            B_enable = All_possible_B_enable(CURRENT_NUM_TRIAL_B, :);
+        end
+
+        for CURRENT_NUM_TRIAL_CROSS_CONNECTION = 1:1:TOTAL_NUM_TRIAL_CROSS_CONNECTION
+
+            waitbar((TOTAL_NUM_TRIAL_CROSS_CONNECTION*(CURRENT_NUM_TRIAL_B - 1) + CURRENT_NUM_TRIAL_CROSS_CONNECTION)/(TOTAL_NUM_TRIAL_CROSS_CONNECTION*TOTAL_NUM_TRIAL_B), WB4, 'Finding network extraction solution ....');
+
+            M_matrix = zeros(N, N);
+            
+            TOTAL_NUM_EXTRACTION = 0;
+            working_node = 0;
+            ending_node = N + 1;
+           
+            cross_connection_matrix = generate_cross_connection_matrix(All_possible_cross_connections(CURRENT_NUM_TRIAL_CROSS_CONNECTION, :));
+            remaining_cross_connection_matrix = cross_connection_matrix;
+    
+            current_sweep_valid = 1;
+            num_of_elements = ceil(N/2) - 1;
+            for element = 1:1:num_of_elements
+                if cross_connection_matrix(element, N - element) == 1 && cross_connection_matrix(element+1, N - element + 1) == 1
+                    current_sweep_valid = 0;
+                    break
+                end
+            end
+    
+
+            if current_sweep_valid
+                try
+                    num_coupling = sum(cross_connection_matrix, "all")/2;
+                    num_FIR = sum(B_enable, "all");
+                    TOTAL_NUM_EXTRACTION = 2*N + 1 + num_coupling + num_FIR;
+                
+                    A = sym('A',[2 TOTAL_NUM_EXTRACTION + 1]);
+                    B = sym('B',[2 TOTAL_NUM_EXTRACTION + 1]);
+                    C = sym('C',[2 TOTAL_NUM_EXTRACTION + 1]);
+                    D = sym('D',[2 TOTAL_NUM_EXTRACTION + 1]);
+                    P = sym('P',[2 TOTAL_NUM_EXTRACTION + 1]);
+            
+                    Extracted_C = zeros(1, N);
+                    Extracted_B = zeros(1, N);
+                    
+                
+                    [A, B, C, D, P] = EF2ABCD(A, B, C, D, P, ES, FS, PS, epsilon);
+                    working_node = 0;
+                    ending_node = N + 1;
+                    [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                    working_node = next_working_node(working_node, Extracted_C);
+                    [A, B, C, D, P] = reverse(A, B, C, D, P);
+                    [working_node, ending_node] = swap(working_node, ending_node);
+                    [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                    working_node = next_working_node(working_node, Extracted_C);
+                    [A, B, C, D, P] = reverse(A, B, C, D, P);
+                    [working_node, ending_node] = swap(working_node, ending_node);
+                
+                    for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
+                        if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
+                            if isEven(N)
+                                [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                            else
+                                [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                            end
+                        elseif Extracted_C(working_node) == 0
+                            [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
+                        elseif  B_enable(working_node) == 1 && Extracted_B(working_node) == 0
+                            [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_B, A, B, C, D, P);
+                        else
+                            [A, B, C, D, P] = reverse(A, B, C, D, P);
+                            [working_node, ending_node] = swap(working_node, ending_node);
+                            if Extracted_C(working_node) == 0
+                                [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
+                            elseif  B_enable(working_node) == 1 && Extracted_B(working_node) == 0
+                                [Extracted_B, A, B, C, D, P] = B_extraction(Extracted_B, A, B, C, D, P);
+                            elseif cross_connection_matrix(working_node, ending_node) == 1 && M_matrix(working_node, ending_node) == 0
+                                [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                            else
+                                working_connection = sum(remaining_cross_connection_matrix(working_node, :), "all");
+                                ending_connection = sum(remaining_cross_connection_matrix(ending_node, :), "all");
+                                if working_connection>ending_connection
+                                    [A, B, C, D, P] = reverse(A, B, C, D, P);
+                                    [working_node, ending_node] = swap(working_node, ending_node);
+                                    [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                                    working_node = next_working_node(working_node, Extracted_C);
+                                elseif working_connection<ending_connection
+                                    [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                                    working_node = next_working_node(working_node, Extracted_C);
+                                else
+                                    if (abs(next_working_node(working_node, Extracted_C) - (N+1-ending_node)) >= 2) || (Network_Extraction_Force_Ending_With_Cross_Coupling && ((working_node>ceil(N/2) && next_working_node(working_node, Extracted_C)<=ceil(N/2)) || (working_node<=ceil(N/2) && next_working_node(working_node, Extracted_C)>ceil(N/2)))) 
+                                        [A, B, C, D, P] = reverse(A, B, C, D, P);
+                                        [working_node, ending_node] = swap(working_node, ending_node);
+                                        [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                                        working_node = next_working_node(working_node, Extracted_C);
+                                    else
+                                        [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
+                                        working_node = next_working_node(working_node, Extracted_C);
+                                    end
+                                end
+                            end
+                        end
+                    end
+                
+                    current_trial_successful = 1;
+                    for i = 1:1:N
+                        if Extracted_C(i) == 0
+                            current_trial_successful = 0;
+                            break;
+                        end
+                    end
+
+                    if current_trial_successful
+                        num_solution_found = num_solution_found + 1;
+                        found_cross_connection_matrix(:, :, num_solution_found) = cross_connection_matrix;
+                        found_B_enable(num_solution_found, :) = B_enable;
+                        found_M_matrix(:, :, num_solution_found) = M_matrix;
+                        found_Extracted_C(num_solution_found, :) = Extracted_C;
+                        found_Extracted_B(num_solution_found, :) = Extracted_B;
+                    end
+
+                catch
+                end
+            end
+
+            if num_solution_found == target_num_solution
+                break;
+            end
+        end
+
+        if num_solution_found == target_num_solution
+            break;
+        end
+    end
+    close(WB4)
+
+    if num_solution_found ~= 0
+        if num_solution_found == 1
+            msgbox("Successfully found " + num_solution_found + " network extraction solution!", "Successful");
+        else
+            msgbox("Successfully found " + num_solution_found + " network extraction solutions!", "Successful");
+        end
+        
+        for current_solution = 1:1:num_solution_found
+            scaled_M_matrix = zeros(N,N);
+            scaled_Extracted_C = ones(1, N);
+            scaled_Extracted_B = zeros(1, N);
+        
+        
+            for i = 1:1:N
+                for j = 1:1:N
+                    if found_M_matrix(i,j, current_solution) ~= 0
+                        scaled_M_matrix(i,j) = found_M_matrix(i,j, current_solution)/sqrt(found_Extracted_C(current_solution,i)*found_Extracted_C(current_solution,j));
+                    end
+                end
+            end
+        
+            for i = 1:1:N
+                scaled_Extracted_B(i) = found_Extracted_B(current_solution,i)/found_Extracted_C(current_solution,i);
+            end
+        
+            SL_scaled_M_matrix = zeros(N+2, N+2);
+            SL_scaled_M_matrix(2:end-1, 2:end-1) = scaled_M_matrix;
+            SL_scaled_M_matrix(1, 2) = 1/sqrt(found_Extracted_C(current_solution,1));
+            SL_scaled_M_matrix(2, 1) = 1/sqrt(found_Extracted_C(current_solution,1));
+            SL_scaled_M_matrix(end-1, end) = 1/sqrt(found_Extracted_C(current_solution,end));
+            SL_scaled_M_matrix(end, end-1) = 1/sqrt(found_Extracted_C(current_solution,end));
+        
+        
+            RS = SL_scaled_M_matrix(1, 2)^2;
+            RL = SL_scaled_M_matrix(end-1, end)^2;
+    
+            step_size = (freq_end-freq_start)/steps;
+            
+            R = zeros(N, N);
+            R(1,1) = RS;
+            R(end, end) = RL;
+            
+            S11_M_matrix = zeros(1, steps + 1);
+            S21_M_matrix = zeros(1, steps + 1);
+            
+            WB5 = waitbar(0,'Calculating S11 and S21 from extracted M Matrix ....');
+            
+            for f = freq_start : step_size : freq_end
+            waitbar((f-freq_start)/(freq_end-freq_start), WB5,'Calculating S11 and S21 from extracted M Matrix ....');
+        
+            lambda = center_freq/Bandwidth*(f/center_freq-center_freq/f);
+            
+            A_matrix = lambda*eye(N) - 1i*R + scaled_M_matrix;
+            A_matrix_inv = A_matrix^(-1);
+            
+            S11_M_matrix((f - freq_start)/step_size + 1) = 1 + 2*1i*RS*A_matrix_inv(1,1);
+            S21_M_matrix(round((f - freq_start)/step_size + 1)) = -2*1i*sqrt(RS*RL)*A_matrix_inv(N,1);
+            end
+        
+            close(WB5)
+            
+            freq = linspace(freq_start, freq_end, steps + 1);
+            
+            figure;
+            ref = plot(freq, 20*log10(abs(S11_M_matrix)));
+            hold on
+            trans = plot(freq, 20*log10(abs(S21_M_matrix)));
+            hold off
+            
+            legend([ref, trans], "S11", "S21")
+            xlabel("Frequency (Hz)")
+            ylabel("dB")
+            title("Solution " + current_solution + " Extracted M Matrix S11 S21 vs Frequency")
+        end
+    else
+        msgbox("No network extraction solution was found!", "Failed");
+    end
+end
+    
+       
+
+
+
+
+
 
 
 
@@ -760,4 +1020,30 @@ end
 
 function boolean1 = isEven(N)
     boolean1 = mod(N, 2) == 0;
+end
+
+
+function sweeping_cross_connection_matrix = generate_cross_connection_matrix(connection_choise)
+    global N
+
+    sweeping_cross_connection_matrix = zeros(N, N);
+
+    for i = 1:1:size(connection_choise, 2)
+        group_number = ceil(i/3);
+        group_index = i - 3*(group_number - 1);
+        if group_index == 1 || group_index == 2
+            row = group_number;
+        else
+            row = group_number + 1;
+        end
+        if group_index == 1 || group_index == 3
+            column = N - group_number + 1;
+        else
+            column = N - group_number;
+        end
+        if connection_choise(i) == 1
+            sweeping_cross_connection_matrix(row, column) = 1;
+            sweeping_cross_connection_matrix(column, row) = 1;
+        end
+    end
 end
