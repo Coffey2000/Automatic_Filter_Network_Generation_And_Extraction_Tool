@@ -3,18 +3,18 @@ global limit_noise_suppressor N M_matrix cross_connection_matrix remaining_cross
 %% Filter Setup
 N = 4;                          % Filter order
 RL = 24;                        % Filter Return Loss (dB)
-TZ = [1.5 -1.5];                % Array of frequencies of transmittion zeros (rad/s)
+TZ = [1.56 -1.56];                % Array of frequencies of transmittion zeros (rad/s)
                                 % For transmission zeros at infinity, type "inf"
 
 %% Simulation Setup
 Polynomial_Solver = "recursive";                                    % Choose between recursive solver and numerical solver for polynomial generation
 Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
-Network_Extraction_Force_Ending_With_Cross_Coupling = false;         % Force the ending coupling to be extracted as cross coupling
+Network_Extraction_Force_Ending_With_Cross_Coupling = true;         % Force the ending coupling to be extracted as cross coupling
 
-Find_Extraction_Solution_Fast = true;
-Find_Extraction_Solution_All = false;
-target_num_solution = 1;
-limit_noise_suppressor = 1e-3;
+Find_Extraction_Solution_Fast = false;                              % Enable to automatically find coupling connection solutions (try with FIRs that are all off or on)
+Find_Extraction_Solution_All = false;                               % Enable to automatically find coupling connection solutions (try all combinations of FIRs)
+target_num_solution = 1;                                            % Targeting number of couping connection solutions to find
+limit_noise_suppressor = 1e-3;                                      % When doing limit, coefficients smaller than this number are cleared.
 
 %% Debugging Tool                                        
                                                          % The two rows in the ABCDP matrixes represents the direction of the expression. 
@@ -23,6 +23,7 @@ limit_noise_suppressor = 1e-3;
                                                          % or each of the ABCDP expression is used for (column)th extraction.
 
 Enable_ABCDP_simplification = true;                      % Enable simplification of the ABCD and P expressions for easier understanding
+Enable_UV_simplification = true;                         % Enable simplification of the U and V expressions for easier understanding
 round_to_decimal_places = 3;                             % Number of decimal places to round to in simplification
 
 %% Plotting Setup
@@ -32,10 +33,10 @@ normalized_freq_end = 3;                    % End frequency (rad/s)
 
 
 Plot_S_from_extracted_M_matrix = true;      % Enable to plot S11 and S21 from the extracted M matrix
-Bandwidth = 40e6;                           % Bandwidth
-center_freq = 3.6e9;                        % Center frequency
-freq_start = 3.5e9;                         % Start frequency (Hz)
-freq_end = 3.7e9;                           % End frequency (Hz)
+Bandwidth = 100e6;                           % Bandwidth
+center_freq = 6e9;                        % Center frequency
+freq_start = 5.8e9;                         % Start frequency (Hz)
+freq_end = 6.2e9;                           % End frequency (Hz)
 
 
 steps = 1000;                               % Number of steps
@@ -74,8 +75,17 @@ if Polynomial_Solver == "recursive"
             U(n) = w * U(n-1) - U(n-1)/TZ(n) + sqrt(w^2 - 1) * sqrt(1 - 1/(TZ(n)^2)) * V(n-1);
             V(n) = w * V(n-1) - V(n-1)/TZ(n) + sqrt(w^2 - 1) * sqrt(1 - 1/(TZ(n)^2)) * U(n-1);
         end
+        
+        if Enable_UV_simplification
+            try
+                U_simplified(n) = vpa(poly2sym(round(sym2poly(U(n)), round_to_decimal_places), w));
+                V_simplified(n) = vpa(poly2sym(round(sym2poly(V(n)), round_to_decimal_places), w));
+            catch
+            end
+        end
     end
-    
+
+
     FW_roots = roots(sym2poly(U(N)));
     FW = poly(FW_roots);
     FW(abs(FW)<1e-10) = 0;
@@ -194,10 +204,10 @@ if Plot_S_from_polynomials
     
     WB1 = waitbar(0,'Calculating S11 and S21 from polynomials ....');
     
-    for w_current = normalized_freq_start : step_size : normalized_freq_end
-        waitbar((w_current-normalized_freq_start)/(normalized_freq_end - normalized_freq_start), WB1,'Calculating S11 and S21 from polynomials ....');
-        S21_polynomial(round((w_current - normalized_freq_start)/step_size + 1)) = double(abs(subs(PW_sym, w, w_current)))/(epsilon * double(abs(subs(EW_sym, w, w_current))));
-        S11_polynomial(round((w_current - normalized_freq_start)/step_size + 1)) = double(abs(subs(FW_sym, w, w_current)))/double(abs(subs(EW_sym, w, w_current)));
+    for normalized_freq_current = normalized_freq_start : step_size : normalized_freq_end
+        waitbar((normalized_freq_current-normalized_freq_start)/(normalized_freq_end - normalized_freq_start), WB1,'Calculating S11 and S21 from polynomials ....');
+        S21_polynomial(round((normalized_freq_current - normalized_freq_start)/step_size + 1)) = double(abs(subs(PW_sym, w, normalized_freq_current)))/(epsilon * double(abs(subs(EW_sym, w, normalized_freq_current))));
+        S11_polynomial(round((normalized_freq_current - normalized_freq_start)/step_size + 1)) = double(abs(subs(FW_sym, w, normalized_freq_current)))/double(abs(subs(EW_sym, w, normalized_freq_current)));
     end
     
     close(WB1)
@@ -681,7 +691,19 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
     end
 end
     
-       
+
+
+clearvars A_matrix A_matrix_inv All_possible_B_enable All_possible_cross_connections CURRENT_NUM_EXTRACTION CURRENT_NUM_TRIAL_B ...
+    CURRENT_NUM_TRIAL_CROSS_CONNECTION current_solution current_trial_successful Enable_ABCDP_simplification Enable_Network_Extraction...
+    ending_connection ending_node failed Find_Extraction_Solution_All Find_Extraction_Solution_Fast i j lambda limit_noise_suppressor...
+    num_coupling num_FIR num_of_elements num_of_finite_TZ Plot_S_from_polynomials Plot_S_from_extracted_M_matrix ...
+    WB0 WB1 WB2 WB3 WB4 WB5 ref trans element remaining_cross_connection_matrix R RL RS S11_M_matrix S11_polynomial ...
+    S21_M_matrix S21_polynomial step_size steps TOTAL_NUM_EXTRACTION TOTAL_NUM_TRIAL_B TOTAL_NUM_TRIAL_CROSS_CONNECTION ...
+    valid w s working_connection working_node target_num_solution N n freq freq_end freq_start center_freq current_sweep_valid...
+    f finite_TZ Network_Extraction_Force_Ending_With_Cross_Coupling normalized_freq_current normalized_freq_end normalized_freq_start...
+    num_choices_cross_connections Polynomial_Solver round_to_decimal_places
+
+
 
 
 
