@@ -3,17 +3,17 @@ global limit_noise_suppressor N M_matrix cross_connection_matrix remaining_cross
 %% Filter Setup
 N = 4;                          % Filter order
 RL = 24;                        % Filter Return Loss (dB)
-TZ = [1.56 -1.56];                % Array of frequencies of transmittion zeros (rad/s)
+TZ = [1.5 -1.5];                % Array of frequencies of transmittion zeros (rad/s)
                                 % For transmission zeros at infinity, type "inf"
 
 %% Simulation Setup
-Polynomial_Solver = "recursive";                                    % Choose between recursive solver and numerical solver for polynomial generation
+Polynomial_Solver = "numerical";                                    % Choose between recursive solver and numerical solver for polynomial generation
 Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
 Network_Extraction_Force_Ending_With_Cross_Coupling = true;         % Force the ending coupling to be extracted as cross coupling
 
-Find_Extraction_Solution_Fast = false;                              % Enable to automatically find coupling connection solutions (try with FIRs that are all off or on)
+Find_Extraction_Solution_Fast = true;                              % Enable to automatically find coupling connection solutions (try with FIRs that are all off or on)
 Find_Extraction_Solution_All = false;                               % Enable to automatically find coupling connection solutions (try all combinations of FIRs)
-target_num_solution = 1;                                            % Targeting number of couping connection solutions to find
+target_num_solution = 2;                                            % Targeting number of couping connection solutions to find
 limit_noise_suppressor = 1e-3;                                      % When doing limit, coefficients smaller than this number are cleared.
 
 %% Debugging Tool                                        
@@ -192,33 +192,31 @@ waitbar(1, WB0,'Generating filter polynomials ....');
 close(WB0)
 
 
-%% Plot S parameters from the polynomials
+%% Calculate and Plot S parameters from the polynomials
+
+step_size = (normalized_freq_end-normalized_freq_start)/steps;
+
+S11_polynomial = zeros(1, steps + 1);
+S21_polynomial = zeros(1, steps + 1);
 
 
+WB1 = waitbar(0,'Calculating S11 and S21 from polynomials ....');
+
+for normalized_freq_current = normalized_freq_start : step_size : normalized_freq_end
+    waitbar((normalized_freq_current-normalized_freq_start)/(normalized_freq_end - normalized_freq_start), WB1,'Calculating S11 and S21 from polynomials ....');
+    S21_polynomial(round((normalized_freq_current - normalized_freq_start)/step_size + 1)) = abs(subs(PW_sym, w, normalized_freq_current)/(epsilon * subs(EW_sym, w, normalized_freq_current)));
+    S11_polynomial(round((normalized_freq_current - normalized_freq_start)/step_size + 1)) = abs(subs(FW_sym, w, normalized_freq_current)/subs(EW_sym, w, normalized_freq_current));
+end
+
+close(WB1)
+    
 if Plot_S_from_polynomials
-    step_size = (normalized_freq_end-normalized_freq_start)/steps;
-    
-    S11_polynomial = zeros(1, steps + 1);
-    S21_polynomial = zeros(1, steps + 1);
-    
-    
-    WB1 = waitbar(0,'Calculating S11 and S21 from polynomials ....');
-    
-    for normalized_freq_current = normalized_freq_start : step_size : normalized_freq_end
-        waitbar((normalized_freq_current-normalized_freq_start)/(normalized_freq_end - normalized_freq_start), WB1,'Calculating S11 and S21 from polynomials ....');
-        S21_polynomial(round((normalized_freq_current - normalized_freq_start)/step_size + 1)) = double(abs(subs(PW_sym, w, normalized_freq_current)))/(epsilon * double(abs(subs(EW_sym, w, normalized_freq_current))));
-        S11_polynomial(round((normalized_freq_current - normalized_freq_start)/step_size + 1)) = double(abs(subs(FW_sym, w, normalized_freq_current)))/double(abs(subs(EW_sym, w, normalized_freq_current)));
-    end
-    
-    close(WB1)
-    
     freq = linspace(normalized_freq_start, normalized_freq_end, steps + 1);
-    %freq_shifted = center_freq/Bandwidth*(freq./center_freq - center_freq./freq);
     
     figure;
-    ref = plot(freq, 20*log10(abs(S11_polynomial)));
+    ref = plot(freq, 20*log10(S11_polynomial));
     hold on
-    trans = plot(freq, 20*log10(abs(S21_polynomial)));
+    trans = plot(freq, 20*log10(S21_polynomial));
     hold off
     
     legend([ref, trans], "S11", "S21")
@@ -351,50 +349,58 @@ if Enable_Network_Extraction
         end
         
         
-        failed = 0;
-        for i = 1:1:N
-            if Extracted_C(i) == 0
-                failed = 1;
-                break;
-            end
-        end
+        current_trial_successful = 0;
 
-        if failed
-            msgbox("Network extraction failed! Please try another coupling connection.", "Warning", "warn");
-        end
-    
-        scaled_M_matrix = zeros(N,N);
-        scaled_Extracted_C = ones(1, N);
-        scaled_Extracted_B = zeros(1, N);
-    
-    
-        for i = 1:1:N
-            for j = 1:1:N
-                if M_matrix(i,j) ~= 0
-                    scaled_M_matrix(i,j) = M_matrix(i,j)/sqrt(Extracted_C(i)*Extracted_C(j));
+        if is_C_full(Extracted_C)
+            if is_ABCD_finished(A, B, C, D)
+                if is_response_identical(Extracted_B, Extracted_C, normalized_freq_start, normalized_freq_end, steps, S11_polynomial, S21_polynomial)
+                    current_trial_successful = 1;
                 end
             end
         end
-    
-        for i = 1:1:N
-            scaled_Extracted_B(i) = Extracted_B(i)/Extracted_C(i);
-        end
-    
-        SL_scaled_M_matrix = zeros(N+2, N+2);
-        SL_scaled_M_matrix(2:end-1, 2:end-1) = scaled_M_matrix;
-        SL_scaled_M_matrix(1, 2) = 1/sqrt(Extracted_C(1));
-        SL_scaled_M_matrix(2, 1) = 1/sqrt(Extracted_C(1));
-        SL_scaled_M_matrix(end-1, end) = 1/sqrt(Extracted_C(end));
-        SL_scaled_M_matrix(end, end-1) = 1/sqrt(Extracted_C(end));
-    
-    
-        RS = SL_scaled_M_matrix(1, 2)^2;
-        RL = SL_scaled_M_matrix(end-1, end)^2;
+
+
+        if current_trial_successful
+            scaled_M_matrix = zeros(N,N);
+            scaled_Extracted_C = ones(1, N);
+            scaled_Extracted_B = zeros(1, N);
         
+            
+            for i = 1:1:N
+                scaled_Extracted_B(i) = Extracted_B(i)/Extracted_C(i);
+            end
+           
+    
+            for i = 1:1:N
+                for j = 1:1:N
+                    if j == i
+                        scaled_M_matrix(i,j) = scaled_Extracted_B(j);
+                    elseif M_matrix(i,j) ~= 0
+                        scaled_M_matrix(i,j) = M_matrix(i,j)/sqrt(Extracted_C(i)*Extracted_C(j));
+                    end
+                end
+            end
+    
+        
+            SL_scaled_M_matrix = zeros(N+2, N+2);
+            SL_scaled_M_matrix(2:end-1, 2:end-1) = scaled_M_matrix;
+            SL_scaled_M_matrix(1, 2) = 1/sqrt(Extracted_C(1));
+            SL_scaled_M_matrix(2, 1) = 1/sqrt(Extracted_C(1));
+            SL_scaled_M_matrix(end-1, end) = 1/sqrt(Extracted_C(end));
+            SL_scaled_M_matrix(end, end-1) = 1/sqrt(Extracted_C(end));
+        
+        
+            RS = SL_scaled_M_matrix(1, 2)^2;
+            RL = SL_scaled_M_matrix(end-1, end)^2;
+        else
+            msgbox("Network extraction failed! Please try another coupling connection.", "Warning", "warn");
+        end
+        
+
 
 %% Plot S Parameters from Network Extraction
 
-        if Plot_S_from_extracted_M_matrix && ~failed
+        if Plot_S_from_extracted_M_matrix && current_trial_successful
             step_size = (freq_end-freq_start)/steps;
             
             R = zeros(N, N);
@@ -407,15 +413,15 @@ if Enable_Network_Extraction
             WB3 = waitbar(0,'Calculating S11 and S21 from extracted M Matrix ....');
             
             for f = freq_start : step_size : freq_end
-            waitbar((f-freq_start)/(freq_end-freq_start), WB3,'Calculating S11 and S21 from extracted M Matrix ....');
-        
-            lambda = center_freq/Bandwidth*(f/center_freq-center_freq/f);
+                waitbar((f-freq_start)/(freq_end-freq_start), WB3,'Calculating S11 and S21 from extracted M Matrix ....');
             
-            A_matrix = lambda*eye(N) - 1i*R + scaled_M_matrix;
-            A_matrix_inv = A_matrix^(-1);
-            
-            S11_M_matrix((f - freq_start)/step_size + 1) = 1 + 2*1i*RS*A_matrix_inv(1,1);
-            S21_M_matrix(round((f - freq_start)/step_size + 1)) = -2*1i*sqrt(RS*RL)*A_matrix_inv(N,1);
+                lambda = center_freq/Bandwidth*(f/center_freq-center_freq/f);
+                
+                A_matrix = lambda*eye(N) - 1i*R + scaled_M_matrix;
+                A_matrix_inv = A_matrix^(-1);
+                
+                S11_M_matrix(round((f - freq_start)/step_size + 1)) = abs(1 + 2*1i*RS*A_matrix_inv(1,1));
+                S21_M_matrix(round((f - freq_start)/step_size + 1)) = abs(-2*1i*sqrt(RS*RL)*A_matrix_inv(N,1));
             end
         
             close(WB3)
@@ -423,9 +429,9 @@ if Enable_Network_Extraction
             freq = linspace(freq_start, freq_end, steps + 1);
             
             figure;
-            ref = plot(freq, 20*log10(abs(S11_M_matrix)));
+            ref = plot(freq, 20*log10(S11_M_matrix));
             hold on
-            trans = plot(freq, 20*log10(abs(S21_M_matrix)));
+            trans = plot(freq, 20*log10(S21_M_matrix));
             hold off
             
             legend([ref, trans], "S11", "S21")
@@ -580,13 +586,17 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
                         end
                     end
                 
-                    current_trial_successful = 1;
-                    for i = 1:1:N
-                        if Extracted_C(i) == 0
-                            current_trial_successful = 0;
-                            break;
+
+                    current_trial_successful = 0;
+
+                    if is_C_full(Extracted_C)
+                        if is_ABCD_finished(A, B, C, D)
+                            if is_response_identical(Extracted_B, Extracted_C, normalized_freq_start, normalized_freq_end, steps, S11_polynomial, S21_polynomial)
+                                current_trial_successful = 1;
+                            end
                         end
                     end
+                    
 
                     if current_trial_successful
                         num_solution_found = num_solution_found + 1;
@@ -612,6 +622,14 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
     end
     close(WB4)
 
+
+    found_cross_connection_matrix(:, :, num_solution_found + 1:end) = [];
+    found_B_enable(num_solution_found + 1:end, :) = [];
+    found_M_matrix(:, :, num_solution_found + 1:end) = [];
+    found_Extracted_C(num_solution_found + 1:end, :) = [];
+    found_Extracted_B(num_solution_found + 1:end, :) = [];
+
+
     if num_solution_found ~= 0
         if num_solution_found == 1
             msgbox("Successfully found " + num_solution_found + " network extraction solution!", "Successful");
@@ -626,16 +644,21 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
         
         
             for i = 1:1:N
+                scaled_Extracted_B(i) = found_Extracted_B(current_solution, i)/found_Extracted_C(current_solution, i);
+            end
+           
+    
+            for i = 1:1:N
                 for j = 1:1:N
-                    if found_M_matrix(i,j, current_solution) ~= 0
-                        scaled_M_matrix(i,j) = found_M_matrix(i,j, current_solution)/sqrt(found_Extracted_C(current_solution,i)*found_Extracted_C(current_solution,j));
+                    if j == i
+                        scaled_M_matrix(i,j) = scaled_Extracted_B(j);
+                    elseif found_M_matrix(i,j, current_solution) ~= 0
+                        scaled_M_matrix(i,j) = found_M_matrix(i,j, current_solution)/sqrt(found_Extracted_C(current_solution, i)*found_Extracted_C(current_solution, j));
                     end
                 end
             end
-        
-            for i = 1:1:N
-                scaled_Extracted_B(i) = found_Extracted_B(current_solution,i)/found_Extracted_C(current_solution,i);
-            end
+
+
         
             SL_scaled_M_matrix = zeros(N+2, N+2);
             SL_scaled_M_matrix(2:end-1, 2:end-1) = scaled_M_matrix;
@@ -660,15 +683,15 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
             WB5 = waitbar(0,'Calculating S11 and S21 from extracted M Matrix ....');
             
             for f = freq_start : step_size : freq_end
-            waitbar((f-freq_start)/(freq_end-freq_start), WB5,'Calculating S11 and S21 from extracted M Matrix ....');
-        
-            lambda = center_freq/Bandwidth*(f/center_freq-center_freq/f);
+                waitbar((f-freq_start)/(freq_end-freq_start), WB5,'Calculating S11 and S21 from extracted M Matrix ....');
             
-            A_matrix = lambda*eye(N) - 1i*R + scaled_M_matrix;
-            A_matrix_inv = A_matrix^(-1);
-            
-            S11_M_matrix((f - freq_start)/step_size + 1) = 1 + 2*1i*RS*A_matrix_inv(1,1);
-            S21_M_matrix(round((f - freq_start)/step_size + 1)) = -2*1i*sqrt(RS*RL)*A_matrix_inv(N,1);
+                lambda = center_freq/Bandwidth*(f/center_freq-center_freq/f);
+                
+                A_matrix = lambda*eye(N) - 1i*R + scaled_M_matrix;
+                A_matrix_inv = A_matrix^(-1);
+                
+                S11_M_matrix(round((f - freq_start)/step_size + 1)) = abs(1 + 2*1i*RS*A_matrix_inv(1,1));
+                S21_M_matrix(round((f - freq_start)/step_size + 1)) = abs(-2*1i*sqrt(RS*RL)*A_matrix_inv(N,1));
             end
         
             close(WB5)
@@ -676,9 +699,9 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast
             freq = linspace(freq_start, freq_end, steps + 1);
             
             figure;
-            ref = plot(freq, 20*log10(abs(S11_M_matrix)));
+            ref = plot(freq, 20*log10(S11_M_matrix));
             hold on
-            trans = plot(freq, 20*log10(abs(S21_M_matrix)));
+            trans = plot(freq, 20*log10(S21_M_matrix));
             hold off
             
             legend([ref, trans], "S11", "S21")
@@ -1079,6 +1102,102 @@ function sweeping_cross_connection_matrix = generate_cross_connection_matrix(con
             end
             sweeping_cross_connection_matrix(row, column) = 1;
             sweeping_cross_connection_matrix(column, row) = 1;
+        end
+    end
+end
+
+
+function finished_flag = is_ABCD_finished(Ain, Bin, Cin, Din)
+
+    A_current_1 = pad2N(sym2poly(noise_suppress(Ain(1, end))));
+    A_current_2 = pad2N(sym2poly(noise_suppress(Ain(2, end))));
+    if A_current_1(end-1) ~= 0 && A_current_2(end-1) ~= 0
+        finished_flag = 0;
+    else
+        B_current_1 = pad2N(sym2poly(noise_suppress(Bin(1, end))));
+        B_current_2 = pad2N(sym2poly(noise_suppress(Bin(2, end))));
+        if B_current_1(end-1) ~= 0 && B_current_2(end-1) ~= 0
+            finished_flag = 0;
+        else
+            C_current_1 = pad2N(sym2poly(noise_suppress(Cin(1, end))));
+            C_current_2 = pad2N(sym2poly(noise_suppress(Cin(2, end))));
+            if C_current_1(end-1) ~= 0 && C_current_2(end-1) ~= 0
+                finished_flag = 0;
+            else
+                D_current_1 = pad2N(sym2poly(noise_suppress(Din(1, end))));
+                D_current_2 = pad2N(sym2poly(noise_suppress(Din(2, end))));
+                if D_current_1(end-1) ~= 0 && D_current_2(end-1) ~= 0
+                    finished_flag = 0;
+                else
+                    finished_flag = 1;
+                end
+            end
+        end
+    end
+end
+
+
+function same_S_flag = is_response_identical(Extracted_B, Extracted_C, normalized_freq_start, normalized_freq_end, steps, S11_polynomial, S21_polynomial)
+    global M_matrix N
+
+    scaled_M_matrix = zeros(N,N);
+    scaled_Extracted_B = zeros(1, N);
+
+    
+    for i = 1:1:N
+        scaled_Extracted_B(i) = Extracted_B(i)/Extracted_C(i);
+    end
+   
+
+    for i = 1:1:N
+        for j = 1:1:N
+            if j == i
+                scaled_M_matrix(i,j) = scaled_Extracted_B(j);
+            elseif M_matrix(i,j) ~= 0
+                scaled_M_matrix(i,j) = M_matrix(i,j)/sqrt(Extracted_C(i)*Extracted_C(j));
+            end
+        end
+    end
+
+
+    RS = (1/sqrt(Extracted_C(1)))^2;
+    RL = (1/sqrt(Extracted_C(end)))^2;
+    
+    step_size = (normalized_freq_end-normalized_freq_start)/steps;
+    
+    R = zeros(N, N);
+    R(1,1) = RS;
+    R(end, end) = RL;
+    
+    cumulative_error = 0;
+
+    for f = normalized_freq_start : step_size : normalized_freq_end
+        lambda = f;
+        
+        A_matrix = lambda*eye(N) - 1i*R + scaled_M_matrix;
+        A_matrix_inv = A_matrix^(-1);
+        
+        cumulative_error = cumulative_error + abs(S11_polynomial(round((f - normalized_freq_start)/step_size + 1)) - abs(1 + 2*1i*RS*A_matrix_inv(1,1)));
+        cumulative_error = cumulative_error + abs(S21_polynomial(round((f - normalized_freq_start)/step_size + 1)) - abs(-2*1i*sqrt(RS*RL)*A_matrix_inv(N,1)));
+    end
+
+
+    if cumulative_error/steps > 1e-10
+        same_S_flag = 0;
+    else
+        same_S_flag = 1;
+    end
+end
+
+
+function C_full_flag = is_C_full(Extracted_C)
+    global N
+
+    C_full_flag = 1;
+    for i = 1:1:N
+        if Extracted_C(i) == 0
+            C_full_flag = 0;
+            break;
         end
     end
 end

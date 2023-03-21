@@ -5,7 +5,7 @@ N = 4;
 
 %% GUI
 cross_connection_matrix = zeros(N, N);
-B_enable = ones(1, N);
+B_enable = zeros(1, N);
 
 
 if isEven(N)
@@ -31,8 +31,8 @@ if isEven(N)
     uitextarea('Parent', GUI, 'Position',[window_width-77 150 6 130], 'BackgroundColor','black' );
     
     for element = 1:1:num_of_elements
-    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 330 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(element), 'Value', 1);
-    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 85 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(N - element + 1), 'Value', 1);
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 330 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(element));
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 85 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(N - element + 1));
     end
     
     num_of_elements = ceil(N/2) - 1;
@@ -69,11 +69,11 @@ else
     uitextarea('Parent', GUI, 'Position',[200+230*(ceil(N/2)-1) 120 189 6], 'BackgroundColor','black' );
 
     for element = 1:1:num_of_elements
-    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 330 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(element), 'Value', 1);
-    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 85 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(N - element + 1), 'Value', 1);
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 330 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(element));
+    cbx = uicheckbox(GUI,'Position',[380+230*(element-1) 85 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(N - element + 1));
     end
     
-    cbx = uicheckbox(GUI,'Position',[412+230*(ceil(N/2)-1) 205 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(ceil(N/2)), 'Value', 1);
+    cbx = uicheckbox(GUI,'Position',[412+230*(ceil(N/2)-1) 205 102 15], 'ValueChangedFcn',@(cbx,event) BChanged(cbx), 'Text', "jB"+string(ceil(N/2)));
 
     num_of_elements = ceil(N/2) - 1;
     for element = 1:1:num_of_elements
@@ -134,6 +134,7 @@ function ButtonPushed(bt)
         writematrix(B_enable, "B_enable.csv");
         msgbox('Cross connection matrix and FIR components are exported.','Success');
         close(bt.Parent);
+        clearvars;
     end
 end
 
