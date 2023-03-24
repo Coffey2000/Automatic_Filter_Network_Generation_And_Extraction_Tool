@@ -12,7 +12,7 @@ Polynomial_Solver = "recursive";                                    % Choose bet
 Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
 Network_Extraction_Force_Ending_With_Cross_Coupling = true;         % Force the ending coupling to be extracted as cross coupling
 
-Find_Extraction_Solution_Ultra_Fast = true;                         % Enable to automatically find coupling connection solutions (skip mirror cross coupling connections)
+Find_Extraction_Solution_Ultra_Fast = false;                         % Enable to automatically find coupling connection solutions (skip mirror cross coupling connections)
 Find_Extraction_Solution_Fast = false;                              % Enable to automatically find coupling connection solutions (try with FIRs that are all off or on)
 Find_Extraction_Solution_All = false;                               % Enable to automatically find coupling connection solutions (try all combinations of FIRs)
 target_num_solution = 1;                                            % Targeting number of couping connection solutions to find
@@ -160,7 +160,7 @@ waitbar(0.5, WB0,'Generating filter polynomials ....');
 
 %% Solve for epsilon, E(w) and E(S)
 epsilon = abs(double(1/sqrt(10^(RL/10)-1)*subs(PW_sym, w, 1)/subs(FW_sym, w, 1)));
-reference_epsilon = double(1/sqrt(10^(RL/10)-1));
+pure_Chebyshev_epsilon = double(1/sqrt(10^(RL/10)-1));
 
 ES2 = conv(PS, PS)/epsilon^2 + conv(FS, FS);
 % INTER1 = conv(PS, conj(PS))/epsilon^2;
@@ -173,12 +173,12 @@ ES_roots = ES2_roots(real(ES2_roots)<-1e-8);
 
 waitbar(0.75, WB0,'Generating filter polynomials ....');
 
-reference_ES_roots = zeros(1, N);
+pure_Chebyshev_ES_roots = zeros(1, N);
 if num_of_finite_TZ == 0
     for k = 1:1:N
-        reference_ES_roots(k) = -sinh(1/N*asinh(1/reference_epsilon))*sin((pi/2)*(2*k-1)/N) + 1i * cosh(1/N*asinh(1/reference_epsilon))*cos((pi/2)*(2*k-1)/N);
+        pure_Chebyshev_ES_roots(k) = -sinh(1/N*asinh(1/pure_Chebyshev_epsilon))*sin((pi/2)*(2*k-1)/N) + 1i * cosh(1/N*asinh(1/pure_Chebyshev_epsilon))*cos((pi/2)*(2*k-1)/N);
     end
-    ES = poly(reference_ES_roots);
+    ES = poly(pure_Chebyshev_ES_roots);
 else
     ES = poly(ES_roots);
 end
@@ -189,6 +189,7 @@ end
 ES_sym = poly2sym(ES, s);
 EW_sym = subs(ES_sym, s, 1i*w);
 EW = sym2poly(EW_sym);
+ES = pad2N(ES);
 
 waitbar(1, WB0,'Generating filter polynomials ....');
 close(WB0)
@@ -517,7 +518,7 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast || Find_Extract
             cross_connection_matrix = generate_cross_connection_matrix(All_possible_cross_connections(CURRENT_NUM_TRIAL_CROSS_CONNECTION, :));
             
             repeated = 0;
-            if Find_Extraction_Solution_Ultra_Fast
+            if Find_Extraction_Solution_Ultra_Fast && target_num_solution ~= 1
                 repeated = check_repetition(cross_connection_matrix_history);
                 if ~repeated
                     cross_connection_matrix_history = populate(cross_connection_matrix_history);
