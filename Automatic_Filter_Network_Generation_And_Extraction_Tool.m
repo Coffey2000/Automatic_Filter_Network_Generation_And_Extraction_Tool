@@ -2,6 +2,7 @@ global limit_noise_suppressor N M_matrix cross_connection_matrix remaining_cross
 
 %% Filter Setup
 N = 4;                          % Filter order
+IL = 0;                         % Filter ripple level (dB) Set either IL or RL and set the other value to 0!
 RL = 24;                        % Filter Return Loss (dB)
 TZ = [1.5 -1.5];                % Array of frequencies of transmittion zeros (rad/s)
                                 % For transmission zeros at infinity, type "inf"
@@ -10,12 +11,12 @@ Q = [inf inf inf inf];          % Unloaded quality factor of the resonators
 %% Simulation Setup
 Polynomial_Solver = "recursive";                                    % Choose between recursive solver and numerical solver for polynomial generation
 Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
-Network_Extraction_Force_Ending_With_Cross_Coupling = true;         % Force the ending coupling to be extracted as cross coupling
+Network_Extraction_Force_Ending_With_Cross_Coupling = false;        % Force the ending coupling to be extracted as cross coupling
 
-Find_Extraction_Solution_Ultra_Fast = false;                         % Enable to automatically find coupling connection solutions (skip mirror cross coupling connections)
+Find_Extraction_Solution_Ultra_Fast = false;                        % Enable to automatically find coupling connection solutions (skip mirror cross coupling connections)
 Find_Extraction_Solution_Fast = false;                              % Enable to automatically find coupling connection solutions (try with FIRs that are all off or on)
 Find_Extraction_Solution_All = false;                               % Enable to automatically find coupling connection solutions (try all combinations of FIRs)
-target_num_solution = 1;                                            % Targeting number of couping connection solutions to find
+target_num_solution = 2;                                            % Targeting number of couping connection solutions to find
 limit_noise_suppressor = 1e-3;                                      % When doing limit, coefficients smaller than this number are cleared.
 
 %% Debugging Tool                                        
@@ -35,13 +36,28 @@ normalized_freq_end = 3;                    % End frequency (rad/s)
 
 
 Plot_S_from_extracted_M_matrix = true;      % Enable to plot S11 and S21 from the extracted M matrix
-Bandwidth = 100e6;                           % Bandwidth
-center_freq = 6e9;                        % Center frequency
+Bandwidth = 100e6;                          % Bandwidth
+center_freq = 6e9;                          % Center frequency
 freq_start = 5.8e9;                         % Start frequency (Hz)
 freq_end = 6.2e9;                           % End frequency (Hz)
 
 
 steps = 1000;                               % Number of steps
+
+%% Prepare IL, RL and Q
+if IL ~= 0 && RL ~= 0
+    msgbox("IL and RL cannot both be set! Set either IL or RL and set the other value to 0. Using the specified RL in this simulation ....", "Warning", "warn");
+elseif IL == 0 && RL == 0
+    msgbox("IL and RL cannot both be 0! Set either IL or RL and set the other value to 0. Using the specified RL in this simulation ....", "Warning", "warn");
+elseif IL ~= 0
+    RL = -10*log10(1-10^(-IL/10));
+elseif N ~= size(Q,2)
+    msgbox("Q does not have the correct size! Adjusting Q for this simulation ....", "Warning", "warn");
+    Q = pad2N_for_Q(Q);
+end
+
+Return_Loss = RL;
+
 
 %% Solve for P(w) and P(S)
 syms s w 
@@ -160,9 +176,14 @@ waitbar(0.5, WB0,'Generating filter polynomials ....');
 
 %% Solve for epsilon, E(w) and E(S)
 epsilon = abs(double(1/sqrt(10^(RL/10)-1)*subs(PW_sym, w, 1)/subs(FW_sym, w, 1)));
-pure_Chebyshev_epsilon = double(1/sqrt(10^(RL/10)-1));
+%pure_Chebyshev_epsilon = double(1/sqrt(10^(RL/10)-1));
 
-ES2 = conv(PS, PS)/epsilon^2 + conv(FS, FS);
+if isEven(N)
+    ES2 = conv(PS, PS)/epsilon^2 + conv(FS, FS);
+else
+    ES2 = -1 * conv(PS, PS)/epsilon^2 + conv(FS, FS);
+end
+
 % INTER1 = conv(PS, conj(PS))/epsilon^2;
 % INTER2 = conv(FS, conj(FS));
 %ES2 = conv(PS, conj(PS))/epsilon^2 + conv(FS, conj(FS));
@@ -173,17 +194,22 @@ ES_roots = ES2_roots(real(ES2_roots)<-1e-8);
 
 waitbar(0.75, WB0,'Generating filter polynomials ....');
 
-pure_Chebyshev_ES_roots = zeros(1, N);
-if num_of_finite_TZ == 0
-    for k = 1:1:N
-        pure_Chebyshev_ES_roots(k) = -sinh(1/N*asinh(1/pure_Chebyshev_epsilon))*sin((pi/2)*(2*k-1)/N) + 1i * cosh(1/N*asinh(1/pure_Chebyshev_epsilon))*cos((pi/2)*(2*k-1)/N);
-    end
-    ES = poly(pure_Chebyshev_ES_roots);
-else
-    ES = poly(ES_roots);
-end
+% pure_Chebyshev_ES_roots = zeros(1, N);
+% if num_of_finite_TZ == 0
+%     for k = 1:1:N
+%         pure_Chebyshev_ES_roots(k) = -sinh(1/N*asinh(1/pure_Chebyshev_epsilon))*sin((pi/2)*(2*k-1)/N) + 1i * cosh(1/N*asinh(1/pure_Chebyshev_epsilon))*cos((pi/2)*(2*k-1)/N);
+%     end
+%     ES = poly(pure_Chebyshev_ES_roots);
+% else
+%     ES = poly(ES_roots);
+% end
 
-%ES = poly(ES_roots);
+% for k = 1:1:N
+%     pure_Chebyshev_ES_roots(k) = -sinh(1/N*asinh(1/pure_Chebyshev_epsilon))*sin((pi/2)*(2*k-1)/N) + 1i * cosh(1/N*asinh(1/pure_Chebyshev_epsilon))*cos((pi/2)*(2*k-1)/N);
+% end
+% ES = poly(pure_Chebyshev_ES_roots);
+
+ES = poly(ES_roots);
 %reference_ES2 = conv(ES, conj(ES));
 % reference_ES2_roots = roots(reference_ES2);
 ES_sym = poly2sym(ES, s);
@@ -294,11 +320,7 @@ if Enable_Network_Extraction
             for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
                 waitbar(CURRENT_NUM_EXTRACTION/TOTAL_NUM_EXTRACTION, WB2,'Extracting network components ....');
                 if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
-                    if isEven(N)
-                        [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
-                    else
-                        [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
-                    end
+                    [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
                 elseif Extracted_C(working_node) == 0
                     [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
                 elseif B_enable(working_node) == 1 && Extracted_B(working_node) == 0
@@ -342,6 +364,11 @@ if Enable_Network_Extraction
 
 
             if Enable_ABCDP_simplification
+                    A_simplified = sym('A',[2 TOTAL_NUM_EXTRACTION + 1]);
+                    B_simplified = sym('B',[2 TOTAL_NUM_EXTRACTION + 1]);
+                    C_simplified = sym('C',[2 TOTAL_NUM_EXTRACTION + 1]);
+                    D_simplified = sym('D',[2 TOTAL_NUM_EXTRACTION + 1]);
+                    P_simplified = sym('P',[2 TOTAL_NUM_EXTRACTION + 1]);
                 for i = 1:1:2
                     for j = 1:1:TOTAL_NUM_EXTRACTION + 1
                         A_simplified(i, j) = vpa(poly2sym(round(sym2poly(A(i,j)), round_to_decimal_places), s));
@@ -363,7 +390,7 @@ if Enable_Network_Extraction
                     end
                 end
             end
-    
+
     
             if current_trial_successful
                 scaled_M_matrix = zeros(N,N);
@@ -449,7 +476,7 @@ if Enable_Network_Extraction
             title("Extracted M Matrix S11 S21 vs Frequency")
         end
         catch
-            close(WB2)
+            %close(WB2)
             msgbox("Network extraction failed! Please try another coupling connection.", "Warning", "warn");
         end
     
@@ -568,11 +595,7 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast || Find_Extract
                     
                          for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
                             if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
-                                if isEven(N)
-                                    [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
-                                else
-                                    [A, B, C, D, P] = series_unit_INV_extraction(A, B, C, D, P);
-                                end
+                                [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
                             elseif Extracted_C(working_node) == 0
                                 [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
                             elseif B_enable(working_node) == 1 && Extracted_B(working_node) == 0
@@ -748,7 +771,7 @@ clearvars A_matrix A_matrix_inv All_possible_B_enable All_possible_cross_connect
     CURRENT_NUM_TRIAL_CROSS_CONNECTION current_solution current_trial_successful Enable_ABCDP_simplification Enable_Network_Extraction...
     ending_connection ending_node failed Find_Extraction_Solution_All Find_Extraction_Solution_Fast i j lambda limit_noise_suppressor...
     num_coupling num_FIR num_of_elements num_of_finite_TZ Plot_S_from_polynomials Plot_S_from_extracted_M_matrix ...
-    WB0 WB1 WB2 WB3 WB4 WB5 ref trans element remaining_cross_connection_matrix R RL RS S11_M_matrix S11_polynomial ...
+    WB0 WB1 WB2 WB3 WB4 WB5 ref trans element remaining_cross_connection_matrix R RS RL S11_M_matrix S11_polynomial ...
     S21_M_matrix S21_polynomial step_size steps TOTAL_NUM_EXTRACTION TOTAL_NUM_TRIAL_B TOTAL_NUM_TRIAL_CROSS_CONNECTION ...
     valid w s working_connection working_node target_num_solution N n freq freq_end freq_start center_freq current_sweep_valid...
     f finite_TZ Network_Extraction_Force_Ending_With_Cross_Coupling normalized_freq_current normalized_freq_end normalized_freq_start...
@@ -769,10 +792,25 @@ clearvars A_matrix A_matrix_inv All_possible_B_enable All_possible_cross_connect
 function array_done = pad2N_inf(array, N)
     array_done = zeros(1,N+1);
     length = size(array,2);
-    array_done(N-length+2:N+1) = array;
-    array_done(1:N-length+1) = inf;
+    if length>=N+1
+        array_done = array(end - N:end);
+    else
+        array_done(N-length+2:N+1) = array;
+        array_done(1:N-length+1) = inf;
+    end
 end
 
+function array_done = pad2N_for_Q(array)
+    global N
+    array_done = zeros(1,N);
+    length = size(array,2);
+    if length>=N
+        array_done = array(1:N);
+    else
+        array_done(1:length) = array;
+        array_done(length+1:end) = inf;
+    end
+end
 
 function array_done = pad2N(array)
     global N
@@ -816,7 +854,11 @@ function [A, B, C, D, P] = EF2ABCD(Ain, Bin, Cin, Din, Pin, ES, FS, PS, epsilon)
         DS(i) = real(ES(i) - FS(i));
     end
     
-    Prem = PS/epsilon;
+    if isEven(N)
+        Prem = PS/epsilon;
+    else
+        Prem = PS * -1i/epsilon;
+    end
 
     A_current_sym = poly2sym(AS, s);
     B_current_sym = poly2sym(BS, s);
@@ -946,11 +988,13 @@ function [A, B, C, D, P] = parallel_INV_extraction(Ain, Bin, Cin, Din, Pin)
     [~, index_last_element, row] = find_index_and_row(Ain);
 
     syms s
+    % sym2poly(Pin(row, index_last_element))
+    % sym2poly(Bin(row, index_last_element))
     M_parallel_current = double(limit(-1*noise_suppress(Pin(row, index_last_element))/noise_suppress(Bin(row, index_last_element)), s, inf));
 
     A_current_sym = Ain(row, index_last_element);
     B_current_sym = Bin(row, index_last_element);
-    C_current_sym = Cin(row, index_last_element) + 2*M_parallel_current*Pin(row, index_last_element)+ M_parallel_current^2*Bin(row, index_last_element);
+    C_current_sym = Cin(row, index_last_element) + 2*M_parallel_current*Pin(row, index_last_element) + M_parallel_current^2*Bin(row, index_last_element);
     D_current_sym = Din(row, index_last_element);
     P_current_sym = Pin(row, index_last_element) + M_parallel_current*Bin(row, index_last_element);
 
@@ -1139,22 +1183,22 @@ function finished_flag = is_ABCD_finished(Ain, Bin, Cin, Din)
 
     A_current_1 = pad2N(sym2poly(noise_suppress(Ain(1, end))));
     A_current_2 = pad2N(sym2poly(noise_suppress(Ain(2, end))));
-    if A_current_1(end-1) ~= 0 && A_current_2(end-1) ~= 0
+    if (A_current_1(end-1) ~= 0 && A_current_2(end-1) ~= 0) || isnan(A_current_1(end)) || isnan(A_current_2(end))
         finished_flag = 0;
     else
         B_current_1 = pad2N(sym2poly(noise_suppress(Bin(1, end))));
         B_current_2 = pad2N(sym2poly(noise_suppress(Bin(2, end))));
-        if B_current_1(end-1) ~= 0 && B_current_2(end-1) ~= 0
+        if (B_current_1(end-1) ~= 0 && B_current_2(end-1) ~= 0) || isnan(B_current_1(end)) || isnan(B_current_2(end))
             finished_flag = 0;
         else
             C_current_1 = pad2N(sym2poly(noise_suppress(Cin(1, end))));
             C_current_2 = pad2N(sym2poly(noise_suppress(Cin(2, end))));
-            if C_current_1(end-1) ~= 0 && C_current_2(end-1) ~= 0
+            if (C_current_1(end-1) ~= 0 && C_current_2(end-1) ~= 0) || isnan(C_current_1(end)) || isnan(C_current_2(end))
                 finished_flag = 0;
             else
                 D_current_1 = pad2N(sym2poly(noise_suppress(Din(1, end))));
                 D_current_2 = pad2N(sym2poly(noise_suppress(Din(2, end))));
-                if D_current_1(end-1) ~= 0 && D_current_2(end-1) ~= 0
+                if (D_current_1(end-1) ~= 0 && D_current_2(end-1) ~= 0) || isnan(D_current_1(end)) || isnan(D_current_2(end))
                     finished_flag = 0;
                 else
                     finished_flag = 1;
@@ -1208,7 +1252,6 @@ function same_S_flag = is_response_identical(Extracted_B, Extracted_C, normalize
         cumulative_error = cumulative_error + abs(S11_polynomial(round((f - normalized_freq_start)/step_size + 1)) - abs(1 + 2*1i*RS*A_matrix_inv(1,1)));
         cumulative_error = cumulative_error + abs(S21_polynomial(round((f - normalized_freq_start)/step_size + 1)) - abs(-2*1i*sqrt(RS*RL)*A_matrix_inv(N,1)));
     end
-
 
     if cumulative_error/steps > 1e-10
         same_S_flag = 0;
