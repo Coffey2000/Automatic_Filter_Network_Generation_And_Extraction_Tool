@@ -1,9 +1,9 @@
 global limit_noise_suppressor N M_matrix cross_connection_matrix remaining_cross_connection_matrix B_enable TOTAL_NUM_EXTRACTION working_node ending_node
 
 %% Filter Setup
-N = 5;                          % Filter order
-IL = 0;                         % Filter ripple level (dB) Set either IL or RL and set the other value to 0!
-RL = 25;                        % Filter Return Loss (dB)
+N = 8;                          % Filter order
+IL = 0.0138;                         % Filter ripple level (dB) Set either IL or RL and set the other value to 0!
+RL = 0;                        % Filter Return Loss (dB)
 TZ = [inf];                % Array of frequencies of transmittion zeros (rad/s)
                                 % For transmission zeros at infinity, type "inf"
 Q = [inf inf inf inf inf];          % Unloaded quality factor of the resonators
@@ -13,8 +13,8 @@ Polynomial_Solver = "recursive";                                    % Choose bet
 Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
 Network_Extraction_Force_Ending_With_Cross_Coupling = false;        % Force the ending coupling to be extracted as cross coupling
 
-Find_Extraction_Solution_Ultra_Fast = true;                        % Enable to automatically find coupling connection solutions (skip mirror cross coupling connections)
-Find_Extraction_Solution_Fast = false;                              % Enable to automatically find coupling connection solutions (try with FIRs that are all off or on)
+Find_Extraction_Solution_Ultra_Fast = false;                        % Enable to automatically find coupling connection solutions (skip mirror cross coupling connections)
+Find_Extraction_Solution_Fast = true;                              % Enable to automatically find coupling connection solutions (try with FIRs that are all off or on)
 Find_Extraction_Solution_All = false;                               % Enable to automatically find coupling connection solutions (try all combinations of FIRs)
 target_num_solution = 1;                                            % Targeting number of couping connection solutions to find
 limit_noise_suppressor = 1e-3;                                      % When doing limit, coefficients smaller than this number are cleared.
@@ -51,7 +51,9 @@ elseif IL == 0 && RL == 0
     msgbox("IL and RL cannot both be 0! Set either IL or RL and set the other value to 0. Using the specified RL in this simulation ....", "Warning", "warn");
 elseif IL ~= 0
     RL = -10*log10(1-10^(-IL/10));
-elseif N ~= size(Q,2)
+end
+
+if N ~= size(Q,2)
     msgbox("Q does not have the correct size! Adjusting Q for this simulation ....", "Warning", "warn");
     Q = pad2N_for_Q(Q);
 end
@@ -321,9 +323,9 @@ if Enable_Network_Extraction
                 waitbar(CURRENT_NUM_EXTRACTION/TOTAL_NUM_EXTRACTION, WB2,'Extracting network components ....');
                 if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
                     [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
-                    if abs(M_matrix(working_node, ending_node) + 1) < 1e-9
-                        M_matrix(working_node, ending_node) = 1;
-                        M_matrix(ending_node, working_node) = 1;
+                    if num_of_finite_TZ == 0
+                        M_matrix(working_node, ending_node) = abs(M_matrix(working_node, ending_node));
+                        M_matrix(ending_node, working_node) = abs(M_matrix(ending_node, working_node));
                     end
                 elseif Extracted_C(working_node) == 0
                     [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
@@ -615,9 +617,9 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast || Find_Extract
                          for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
                             if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
                                 [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
-                                if abs(M_matrix(working_node, ending_node) + 1) < 1e-9
-                                    M_matrix(working_node, ending_node) = 1;
-                                    M_matrix(ending_node, working_node) = 1;
+                                if num_of_finite_TZ == 0
+                                    M_matrix(working_node, ending_node) = abs(M_matrix(working_node, ending_node));
+                                    M_matrix(ending_node, working_node) = abs(M_matrix(ending_node, working_node));
                                 end
                             elseif Extracted_C(working_node) == 0
                                 [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);

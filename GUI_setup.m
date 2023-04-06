@@ -1,7 +1,7 @@
 global cross_connection_matrix B_enable N
 
 %% Filter Order Setup
-N = 5;
+N = 8;
 
 %% GUI
 cross_connection_matrix = zeros(N, N);
