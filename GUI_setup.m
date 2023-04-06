@@ -1,7 +1,7 @@
 global cross_connection_matrix B_enable N
 
 %% Filter Order Setup
-N = 4;
+N = 5;
 
 %% GUI
 cross_connection_matrix = zeros(N, N);
@@ -87,6 +87,8 @@ else
 end
 
 bt = uibutton(GUI,'Position',[round(window_width)/2-50 20 100 30], "Text", "OK","ButtonPushedFcn", @(bt,event) ButtonPushed(bt));
+
+clear
 
 
 

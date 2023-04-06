@@ -1,22 +1,22 @@
 global limit_noise_suppressor N M_matrix cross_connection_matrix remaining_cross_connection_matrix B_enable TOTAL_NUM_EXTRACTION working_node ending_node
 
 %% Filter Setup
-N = 4;                          % Filter order
+N = 5;                          % Filter order
 IL = 0;                         % Filter ripple level (dB) Set either IL or RL and set the other value to 0!
-RL = 24;                        % Filter Return Loss (dB)
-TZ = [1.5 -1.5];                % Array of frequencies of transmittion zeros (rad/s)
+RL = 25;                        % Filter Return Loss (dB)
+TZ = [inf];                % Array of frequencies of transmittion zeros (rad/s)
                                 % For transmission zeros at infinity, type "inf"
-Q = [inf inf inf inf];          % Unloaded quality factor of the resonators
+Q = [inf inf inf inf inf];          % Unloaded quality factor of the resonators
 
 %% Simulation Setup
 Polynomial_Solver = "recursive";                                    % Choose between recursive solver and numerical solver for polynomial generation
 Enable_Network_Extraction = true;                                   % Enable Network Extraction and generate M matrix
 Network_Extraction_Force_Ending_With_Cross_Coupling = false;        % Force the ending coupling to be extracted as cross coupling
 
-Find_Extraction_Solution_Ultra_Fast = false;                        % Enable to automatically find coupling connection solutions (skip mirror cross coupling connections)
+Find_Extraction_Solution_Ultra_Fast = true;                        % Enable to automatically find coupling connection solutions (skip mirror cross coupling connections)
 Find_Extraction_Solution_Fast = false;                              % Enable to automatically find coupling connection solutions (try with FIRs that are all off or on)
 Find_Extraction_Solution_All = false;                               % Enable to automatically find coupling connection solutions (try all combinations of FIRs)
-target_num_solution = 2;                                            % Targeting number of couping connection solutions to find
+target_num_solution = 1;                                            % Targeting number of couping connection solutions to find
 limit_noise_suppressor = 1e-3;                                      % When doing limit, coefficients smaller than this number are cleared.
 
 %% Debugging Tool                                        
@@ -36,10 +36,10 @@ normalized_freq_end = 3;                    % End frequency (rad/s)
 
 
 Plot_S_from_extracted_M_matrix = true;      % Enable to plot S11 and S21 from the extracted M matrix
-Bandwidth = 100e6;                          % Bandwidth
-center_freq = 6e9;                          % Center frequency
-freq_start = 5.8e9;                         % Start frequency (Hz)
-freq_end = 6.2e9;                           % End frequency (Hz)
+Bandwidth = 38.4e6;                          % Bandwidth
+center_freq = 1.6e9;                          % Center frequency
+freq_start = 1.54e9;                         % Start frequency (Hz)
+freq_end = 1.66e9;                           % End frequency (Hz)
 
 
 steps = 1000;                               % Number of steps
@@ -321,6 +321,10 @@ if Enable_Network_Extraction
                 waitbar(CURRENT_NUM_EXTRACTION/TOTAL_NUM_EXTRACTION, WB2,'Extracting network components ....');
                 if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
                     [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                    if abs(M_matrix(working_node, ending_node) + 1) < 1e-9
+                        M_matrix(working_node, ending_node) = 1;
+                        M_matrix(ending_node, working_node) = 1;
+                    end
                 elseif Extracted_C(working_node) == 0
                     [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
                 elseif B_enable(working_node) == 1 && Extracted_B(working_node) == 0
@@ -510,8 +514,21 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast || Find_Extract
 
     TOTAL_NUM_TRIAL_CROSS_CONNECTION = size(All_possible_cross_connections, 1);
 
+    sum_TZ = 0;
+    for i = 1:1:N
+        if TZ(i) ~= inf
+            sum_TZ = sum_TZ + TZ(i);
+        end
+    end
+
+    if abs(sum_TZ) < 1e-9
+        symmetric_TZ = true;
+    else
+        symmetric_TZ = false;
+    end
+
     if Find_Extraction_Solution_Fast || Find_Extraction_Solution_Ultra_Fast
-        TOTAL_NUM_TRIAL_B = 2;
+        TOTAL_NUM_TRIAL_B = 1;
     else
         TOTAL_NUM_TRIAL_B = size(All_possible_B_enable, 1);
     end
@@ -520,10 +537,12 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast || Find_Extract
 
     for CURRENT_NUM_TRIAL_B = 1:1:TOTAL_NUM_TRIAL_B
 
-        if (Find_Extraction_Solution_Fast || Find_Extraction_Solution_Ultra_Fast) && CURRENT_NUM_TRIAL_B == 1
-            B_enable = zeros(1, N);
-        elseif (Find_Extraction_Solution_Fast || Find_Extraction_Solution_Ultra_Fast) && CURRENT_NUM_TRIAL_B == 2
-            B_enable = ones(1, N);
+        if Find_Extraction_Solution_Fast || Find_Extraction_Solution_Ultra_Fast
+            if symmetric_TZ
+                B_enable = zeros(1, N);
+            else
+                B_enable = ones(1, N);
+            end
         else
             B_enable = All_possible_B_enable(CURRENT_NUM_TRIAL_B, :);
         end
@@ -596,6 +615,10 @@ if Find_Extraction_Solution_All || Find_Extraction_Solution_Fast || Find_Extract
                          for CURRENT_NUM_EXTRACTION = 3:1:TOTAL_NUM_EXTRACTION
                             if CURRENT_NUM_EXTRACTION == TOTAL_NUM_EXTRACTION
                                 [A, B, C, D, P] = parallel_INV_extraction(A, B, C, D, P);
+                                if abs(M_matrix(working_node, ending_node) + 1) < 1e-9
+                                    M_matrix(working_node, ending_node) = 1;
+                                    M_matrix(ending_node, working_node) = 1;
+                                end
                             elseif Extracted_C(working_node) == 0
                                 [Extracted_C, A, B, C, D, P] = C_extraction(Extracted_C, A, B, C, D, P);
                             elseif B_enable(working_node) == 1 && Extracted_B(working_node) == 0
@@ -775,7 +798,8 @@ clearvars A_matrix A_matrix_inv All_possible_B_enable All_possible_cross_connect
     S21_M_matrix S21_polynomial step_size steps TOTAL_NUM_EXTRACTION TOTAL_NUM_TRIAL_B TOTAL_NUM_TRIAL_CROSS_CONNECTION ...
     valid w s working_connection working_node target_num_solution N n freq freq_end freq_start center_freq current_sweep_valid...
     f finite_TZ Network_Extraction_Force_Ending_With_Cross_Coupling normalized_freq_current normalized_freq_end normalized_freq_start...
-    num_choices_cross_connections Polynomial_Solver round_to_decimal_places Enable_UV_simplification cross_connection_matrix_history delta
+    num_choices_cross_connections Polynomial_Solver round_to_decimal_places Enable_UV_simplification cross_connection_matrix_history delta...
+    repeated sum_TZ symmetric_TZ
 
 
 
